@@ -180,12 +180,16 @@ func (a *App) LoadTable(connName string, namespace []string, name string) (*cata
 	return dto, err
 }
 
-// PreviewTable scans the table and returns up to limit rows as JSON-friendly
-// values. limit ≤ 0 defaults to 100 rows. reqID lets the frontend cancel an
-// in-flight scan via CancelPreview on unmount; pass "" to opt out. filters are
+// PreviewTable scans the table and returns up to limit rows starting at
+// offset skip, as JSON-friendly values. limit ≤ 0 defaults to 100 rows;
+// negative skip is clamped to 0. reqID lets the frontend cancel an in-flight
+// scan via CancelPreview on unmount; pass "" to opt out. filters are
 // AND-combined and pushed down to the iceberg-go scan; an empty list returns
-// the unfiltered preview.
-func (a *App) PreviewTable(reqID, connName string, namespace []string, name string, limit int, filters []catalog.PreviewFilterDTO) (*catalog.PreviewRowsDTO, error) {
+// the unfiltered preview. Pagination is scan-and-discard: every call rescans
+// from row 0 and drops the first skip rows, so cost is O(skip+limit) per call.
+// PreviewRowsDTO.HasMore is true when the iterator still had rows beyond
+// skip+limit, meaning the caller can fetch the next page.
+func (a *App) PreviewTable(reqID, connName string, namespace []string, name string, skip, limit int, filters []catalog.PreviewFilterDTO) (*catalog.PreviewRowsDTO, error) {
 	var dto *catalog.PreviewRowsDTO
 	err := a.withCatalog(connName, "preview table", func(cat *rest.Catalog) error {
 		reqCtx, release := a.requests.Register(a.ctx, reqID)
@@ -197,7 +201,7 @@ func (a *App) PreviewTable(reqID, connName string, namespace []string, name stri
 		if err != nil {
 			return err
 		}
-		dto, err = catalog.BuildPreviewRows(ctx, tbl, limit, filters)
+		dto, err = catalog.BuildPreviewRows(ctx, tbl, skip, limit, filters)
 		return err
 	})
 	return dto, err

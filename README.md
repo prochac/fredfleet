@@ -2,7 +2,7 @@
 
 Desktop app for browsing Apache Iceberg catalogs. Built with [Wails v2](https://wails.io) (Go backend + React/TypeScript frontend) on top of [`iceberg-go`](https://github.com/apache/iceberg-go).
 
-Status: M1 — connection manager. Subsequent milestones add namespace browsing, schema viewer, and row preview. See [`PLAN.md`](PLAN.md).
+Status: M3 — connection manager, namespace tree, schema viewer, and row preview with filters and pagination. See [`PLAN.md`](PLAN.md).
 
 ## Prerequisites
 
@@ -82,8 +82,34 @@ Inspect on Linux: `secret-tool lookup service fredfleet account <connection-name
 
 The app follows your OS dark/light preference automatically via `prefers-color-scheme`. No user setting.
 
-## Scope (M1)
+## Row preview
 
-- REST catalog only (Polaris/Lakekeeper). Glue/Hive/SQL backends are deferred.
-- Auth: static bearer token, or OAuth2 client credentials (token re-fetched on expiry). AWS SigV4 deferred.
-- Row preview, schema browsing, etc. land in later milestones.
+Selecting a table loads the first page of rows alongside the schema and partition spec. The preview panel offers a filter bar, a page-size selector (100 / 250 / 500), client-side prev/next navigation over the loaded buffer, and a **Load more** button to append the next page.
+
+### Filters
+
+Filters are pushed down to the iceberg-go scan (server-side). Multiple filters are AND-combined.
+
+| Type | Supported operators |
+|---|---|
+| numeric / date / timestamp / string | `=`, `≠`, `<`, `≤`, `>`, `≥`, `is null`, `not null` |
+| boolean | `=`, `≠`, `is null`, `not null` |
+| binary, struct, list, map | not filterable |
+
+Not supported:
+- `starts with` / `CONTAINS` / `LIKE` / regex — `iceberg-go` v0.5.0 builds the per-record filter via Arrow's substrait evaluator, which has no scalar mapping for `starts_with`. We surface it as a filter error and hide the operator from the UI; revisit when an upstream release ships the mapping.
+- `IN` / `NOT IN`, OR-combining, filtering on nested fields, sorting — out of scope for M3.
+
+### Pagination model
+
+Each fetch is **scan-and-discard**: the server iterates the Arrow stream from row 0, discards the first `skip` rows, and keeps the next `pageSize` rows (with one extra row probed to set `hasMore`). Cost is `O(skip + pageSize)` per call. This is fine for browsing; deep paging on large filtered scans gets linearly slower.
+
+- The single hard upper bound is the per-call timeout (60 seconds). A scan that can't reach `skip + pageSize` rows in time will surface a timeout.
+- Switching the page-size selector to a value that fits in the already-loaded buffer is purely client-side (no fetch). Switching to a larger value triggers a fresh fetch from `skip = 0`.
+- Filter changes always reset the buffer and refetch from `skip = 0`.
+
+## Scope
+
+- **Catalog backends:** REST only (Polaris, Lakekeeper). Glue/Hive/SQL are deferred until after M4.
+- **Auth:** static bearer token, or OAuth2 client credentials (token re-fetched reactively on 401). AWS SigV4 deferred.
+- **Delete files:** whatever `iceberg-go`'s `Scan()` returns. No custom positional/equality-delete handling.

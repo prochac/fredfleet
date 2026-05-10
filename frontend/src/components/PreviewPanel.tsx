@@ -1,8 +1,9 @@
-import {useEffect, useMemo, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 import {
     type ColumnDef,
     flexRender,
     getCoreRowModel,
+    getPaginationRowModel,
     useReactTable,
 } from '@tanstack/react-table';
 import {CancelPreview, PreviewTable} from '../../wailsjs/go/main/App';
@@ -15,12 +16,13 @@ type Props = {
     name: string;
 };
 
-const PAGE_SIZE = 100;
+const PAGE_SIZE_OPTIONS = [100, 250, 500] as const;
+const DEFAULT_PAGE_SIZE = 100;
 
 type Row = Record<string, unknown>;
 type FilterEntry = {id: string; field: string; op: string; value: string};
 
-const TEXT_OPS = ['eq', 'neq', 'lt', 'lte', 'gt', 'gte', 'isnull', 'notnull'] as const;
+const ORDERED_OPS = ['eq', 'neq', 'lt', 'lte', 'gt', 'gte', 'isnull', 'notnull'] as const;
 const OP_LABELS: Record<string, string> = {
     eq: '=',
     neq: '≠',
@@ -30,15 +32,13 @@ const OP_LABELS: Record<string, string> = {
     gte: '≥',
     isnull: 'is null',
     notnull: 'not null',
-    starts: 'starts with',
 };
 
 function opsForColumn(col: catalog.PreviewColumnDTO): string[] {
     if (col.kind !== 'primitive') return [];
-    if (col.typeText === 'string') return [...TEXT_OPS, 'starts'];
     if (col.typeText === 'boolean') return ['eq', 'neq', 'isnull', 'notnull'];
     if (col.typeText === 'binary') return [];
-    return [...TEXT_OPS];
+    return [...ORDERED_OPS];
 }
 
 function placeholderFor(typeText: string): string {
@@ -67,13 +67,38 @@ function newFilter(): FilterEntry {
     return {id: crypto.randomUUID(), field: '', op: '', value: ''};
 }
 
+function toFilterList(filters: FilterEntry[]): catalog.PreviewFilterDTO[] {
+    return filters.filter(isEffective).map((f) => ({
+        field: f.field,
+        op: f.op,
+        value: f.op === 'isnull' || f.op === 'notnull' ? null : f.value,
+    } as catalog.PreviewFilterDTO));
+}
+
 export function PreviewPanel({connName, namespace, name}: Props) {
     const [data, setData] = useState<catalog.PreviewRowsDTO | null>(null);
     const [loading, setLoading] = useState(true);
+    const [loadingMore, setLoadingMore] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [reloadKey, setReloadKey] = useState(0);
     const [filters, setFilters] = useState<FilterEntry[]>([]);
+    const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
+    const [pageIndex, setPageIndex] = useState(0);
     const debouncedFilters = useDebounced(filters, 300);
+
+    // Refs let onPageSizeChange-without-refetch and loadMore use the latest
+    // values without making them part of the reset-effect dependency list.
+    const inFlightReqIDRef = useRef<string | null>(null);
+    const pageSizeRef = useRef(pageSize);
+    pageSizeRef.current = pageSize;
+    const filterListRef = useRef<catalog.PreviewFilterDTO[]>([]);
+    const dataRef = useRef<catalog.PreviewRowsDTO | null>(null);
+    dataRef.current = data;
+    // Tracks the table the current `data` belongs to. We only null `data`
+    // when the table identity actually changes — filter or page-size driven
+    // refetches keep the previous rows visible so the filter UI stays usable
+    // and an error doesn't strand the user with no way to recover.
+    const lastTableKeyRef = useRef<string | null>(null);
 
     const columnsByName = useMemo(() => {
         const out: Record<string, catalog.PreviewColumnDTO> = {};
@@ -89,26 +114,36 @@ export function PreviewPanel({connName, namespace, name}: Props) {
         [data?.columns],
     );
 
+    // Reset-and-fetch: runs on table/connection/filter/manual-retry change, and
+    // on page-size change that requires a refetch (signaled via reloadKey bump
+    // in onPageSizeChange). Page-size itself is not in the deps so a shrink
+    // doesn't fire a refetch.
     useEffect(() => {
         const reqID = crypto.randomUUID();
-        let cancelled = false;
+        const tableKey = `${connName}\x01${namespace.join('\x00')}\x01${name}`;
+        const tableChanged = lastTableKeyRef.current !== tableKey;
+        lastTableKeyRef.current = tableKey;
+        const filterList = toFilterList(debouncedFilters);
+        filterListRef.current = filterList;
+        inFlightReqIDRef.current = reqID;
         setLoading(true);
         setError(null);
-        const filterList: catalog.PreviewFilterDTO[] = debouncedFilters
-            .filter(isEffective)
-            .map((f) => ({
-                field: f.field,
-                op: f.op,
-                value: f.op === 'isnull' || f.op === 'notnull' ? null : f.value,
-            } as catalog.PreviewFilterDTO));
-        PreviewTable(reqID, connName, namespace, name, PAGE_SIZE, filterList)
+        if (tableChanged) {
+            setData(null);
+        }
+        setPageIndex(0);
+        const limit = pageSizeRef.current;
+        let cancelled = false;
+        PreviewTable(reqID, connName, namespace, name, 0, limit, filterList)
             .then((result) => {
-                if (cancelled) return;
+                if (cancelled || inFlightReqIDRef.current !== reqID) return;
+                inFlightReqIDRef.current = null;
                 setData(result);
                 setLoading(false);
             })
             .catch((e) => {
-                if (cancelled) return;
+                if (cancelled || inFlightReqIDRef.current !== reqID) return;
+                inFlightReqIDRef.current = null;
                 setError(errorMessage(e));
                 setLoading(false);
             });
@@ -122,7 +157,7 @@ export function PreviewPanel({connName, namespace, name}: Props) {
         namespace.join('\x00'),
         name,
         reloadKey,
-        JSON.stringify(debouncedFilters.filter(isEffective)),
+        JSON.stringify(toFilterList(debouncedFilters)),
     ]);
 
     const columns = useMemo<ColumnDef<Row>[]>(
@@ -141,8 +176,79 @@ export function PreviewPanel({connName, namespace, name}: Props) {
     const table = useReactTable({
         data: rows,
         columns,
+        state: {pagination: {pageIndex, pageSize}},
+        onPaginationChange: (updater) => {
+            const next = typeof updater === 'function'
+                ? updater({pageIndex, pageSize})
+                : updater;
+            setPageIndex(next.pageIndex);
+            // pageSize changes flow through onPageSizeChange — ignore here.
+        },
         getCoreRowModel: getCoreRowModel(),
+        getPaginationRowModel: getPaginationRowModel(),
     });
+
+    function onPageSizeChange(newSize: number) {
+        if (newSize === pageSize) return;
+        const buffered = dataRef.current?.rows.length ?? 0;
+        if (dataRef.current && newSize <= buffered) {
+            // Buffer already covers the new page size — re-paginate client-side.
+            pageSizeRef.current = newSize;
+            setPageSize(newSize);
+            setPageIndex(0);
+            return;
+        }
+        // Need more rows than the buffer holds: cancel any in-flight call and
+        // re-issue with skip=0, limit=newSize. The reset effect picks up
+        // pageSizeRef.current set below.
+        if (inFlightReqIDRef.current) {
+            CancelPreview(inFlightReqIDRef.current);
+            inFlightReqIDRef.current = null;
+        }
+        pageSizeRef.current = newSize;
+        setPageSize(newSize);
+        setReloadKey((k) => k + 1);
+    }
+
+    async function loadMore() {
+        const current = dataRef.current;
+        if (!current || !current.hasMore || loadingMore) return;
+        const reqID = crypto.randomUUID();
+        inFlightReqIDRef.current = reqID;
+        setLoadingMore(true);
+        setError(null);
+        try {
+            const more = await PreviewTable(
+                reqID,
+                connName,
+                namespace,
+                name,
+                current.rows.length,
+                pageSizeRef.current,
+                filterListRef.current,
+            );
+            if (inFlightReqIDRef.current !== reqID) return;
+            inFlightReqIDRef.current = null;
+            setData((prev) => {
+                if (!prev) return more;
+                const combinedRows = [...prev.rows, ...more.rows];
+                return new catalog.PreviewRowsDTO({
+                    columns: prev.columns,
+                    rows: combinedRows,
+                    rowCount: combinedRows.length,
+                    // If the server returned zero new rows, treat as exhausted
+                    // regardless of the reported flag (defensive against races).
+                    hasMore: more.rows.length === 0 ? false : more.hasMore,
+                });
+            });
+        } catch (e) {
+            if (inFlightReqIDRef.current !== reqID) return;
+            inFlightReqIDRef.current = null;
+            setError(errorMessage(e));
+        } finally {
+            setLoadingMore(false);
+        }
+    }
 
     const activeCount = filters.filter(isEffective).length;
     const clearFilters = () => setFilters([]);
@@ -168,6 +274,9 @@ export function PreviewPanel({connName, namespace, name}: Props) {
             </Pending>
         );
     }
+
+    const totalPages = table.getPageCount();
+    const showPager = rows.length > 0;
 
     return (
         <div className="preview-panel">
@@ -236,6 +345,53 @@ export function PreviewPanel({connName, namespace, name}: Props) {
                     )}
                 </div>
             </div>
+            {showPager && (
+                <div className="pagination-bar">
+                    <label className="page-size">
+                        Rows
+                        <select
+                            value={pageSize}
+                            onChange={(e) => onPageSizeChange(Number(e.target.value))}
+                        >
+                            {PAGE_SIZE_OPTIONS.map((n) => (
+                                <option key={n} value={n}>{n}</option>
+                            ))}
+                        </select>
+                    </label>
+                    <div className="pager">
+                        <button
+                            type="button"
+                            onClick={() => table.previousPage()}
+                            disabled={!table.getCanPreviousPage()}
+                        >
+                            ‹ Prev
+                        </button>
+                        <span className="page-indicator">
+                            Page {pageIndex + 1} of {Math.max(1, totalPages)}
+                        </span>
+                        <button
+                            type="button"
+                            onClick={() => table.nextPage()}
+                            disabled={!table.getCanNextPage()}
+                        >
+                            Next ›
+                        </button>
+                    </div>
+                    <span className="loaded-count">
+                        Loaded {rows.length}{data.hasMore ? '+' : ''} rows
+                    </span>
+                    {data.hasMore && (
+                        <button
+                            type="button"
+                            className="load-more"
+                            onClick={loadMore}
+                            disabled={loadingMore}
+                        >
+                            {loadingMore ? 'Loading…' : 'Load more'}
+                        </button>
+                    )}
+                </div>
+            )}
             {(loading || error || activeCount > 0) && (
                 <div className="preview-status">
                     {activeCount > 0 && (

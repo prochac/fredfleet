@@ -578,6 +578,59 @@ tr:hover td { background: var(--row-hover); }
     font-size: 13px;
     padding: 4px 12px;
 }
+.pagination-bar {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    font-size: 13px;
+}
+.pagination-bar .page-size {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    color: var(--fg-muted);
+}
+.pagination-bar .page-size select {
+    font-size: 13px;
+    padding: 4px 8px;
+}
+.pagination-bar .pager {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+.pagination-bar .pager button {
+    font-size: 13px;
+    padding: 4px 10px;
+}
+.pagination-bar .pager button[disabled] {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+.pagination-bar .page-indicator {
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+    min-width: 110px;
+    text-align: center;
+}
+.pagination-bar .loaded-count {
+    color: var(--fg-muted);
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+}
+.pagination-bar button.load-more {
+    font-size: 13px;
+    padding: 4px 12px;
+}
+.pagination-bar button.load-more[disabled] {
+    opacity: 0.6;
+    cursor: progress;
+}
 .preview-status {
     display: flex;
     gap: 12px;

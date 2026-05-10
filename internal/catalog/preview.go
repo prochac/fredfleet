@@ -14,12 +14,14 @@ import (
 
 const defaultPreviewLimit = 100
 
-// BuildPreviewRows scans t and returns the first `limit` rows in
-// JSON-friendly form. It uses ToArrowRecords (streaming) so memory stays
-// bounded by batch size, not by full table size. filters are AND-combined
-// and pushed down server-side; an empty list short-circuits to AlwaysTrue
-// inside table.WithRowFilter.
-func BuildPreviewRows(ctx context.Context, t *table.Table, limit int, filters []PreviewFilterDTO) (dto *PreviewRowsDTO, err error) {
+// BuildPreviewRows scans t and returns up to `limit` rows starting at offset
+// `skip`, in JSON-friendly form. It uses ToArrowRecords (streaming) so memory
+// stays bounded by batch size, not by full table size. The scan is capped at
+// skip+limit+1 rows; the trailing probe row is dropped from the result and
+// flips HasMore to true so the caller knows another page is available.
+// filters are AND-combined and pushed down server-side; an empty list
+// short-circuits to AlwaysTrue inside table.WithRowFilter.
+func BuildPreviewRows(ctx context.Context, t *table.Table, skip, limit int, filters []PreviewFilterDTO) (dto *PreviewRowsDTO, err error) {
 	// iceberg-go's scanner contains paths that panic on edge cases
 	// (e.g. visitors.go:183, evaluators.go:1035). In a Wails/WebKit
 	// process those panics escalate to fatal signals because WebKit
@@ -34,13 +36,16 @@ func BuildPreviewRows(ctx context.Context, t *table.Table, limit int, filters []
 	if limit <= 0 {
 		limit = defaultPreviewLimit
 	}
+	if skip < 0 {
+		skip = 0
+	}
 
 	expr, err := BuildRowFilter(t.Schema(), filters)
 	if err != nil {
 		return nil, err
 	}
 
-	scan := t.Scan(table.WithLimit(int64(limit)), table.WithRowFilter(expr))
+	scan := t.Scan(table.WithLimit(int64(skip+limit+1)), table.WithRowFilter(expr))
 	arrowSchema, itr, err := scan.ToArrowRecords(ctx)
 	if err != nil {
 		return nil, err
@@ -48,7 +53,10 @@ func BuildPreviewRows(ctx context.Context, t *table.Table, limit int, filters []
 
 	cols := buildPreviewColumns(t.Schema(), arrowSchema)
 	rows := make([]map[string]any, 0, limit)
+	discarded := 0
+	hasMore := false
 
+outer:
 	for batch, ierr := range itr {
 		if ierr != nil {
 			if batch != nil {
@@ -57,7 +65,17 @@ func BuildPreviewRows(ctx context.Context, t *table.Table, limit int, filters []
 			return nil, ierr
 		}
 		schema := batch.Schema()
-		for r := 0; r < int(batch.NumRows()) && len(rows) < limit; r++ {
+		nrows := int(batch.NumRows())
+		for r := range nrows {
+			if discarded < skip {
+				discarded++
+				continue
+			}
+			if len(rows) >= limit {
+				hasMore = true
+				batch.Release()
+				break outer
+			}
 			row := make(map[string]any, batch.NumCols())
 			for c := 0; c < int(batch.NumCols()); c++ {
 				name := schema.Field(c).Name
@@ -66,16 +84,13 @@ func BuildPreviewRows(ctx context.Context, t *table.Table, limit int, filters []
 			rows = append(rows, row)
 		}
 		batch.Release()
-		if len(rows) >= limit {
-			break
-		}
 	}
 
 	return &PreviewRowsDTO{
 		Columns:  cols,
 		Rows:     rows,
 		RowCount: len(rows),
-		HasMore:  false,
+		HasMore:  hasMore,
 	}, nil
 }
 
