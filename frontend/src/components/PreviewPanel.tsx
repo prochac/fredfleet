@@ -5,7 +5,7 @@ import {
     getCoreRowModel,
     useReactTable,
 } from '@tanstack/react-table';
-import {PreviewTable} from '../../wailsjs/go/main/App';
+import {CancelPreview, PreviewTable} from '../../wailsjs/go/main/App';
 import {catalog} from '../../wailsjs/go/models';
 import {Pending} from './Pending';
 
@@ -26,10 +26,11 @@ export function PreviewPanel({connName, namespace, name}: Props) {
     const [reloadKey, setReloadKey] = useState(0);
 
     useEffect(() => {
+        const reqID = crypto.randomUUID();
         let cancelled = false;
         setLoading(true);
         setError(null);
-        PreviewTable(connName, namespace, name, PAGE_SIZE)
+        PreviewTable(reqID, connName, namespace, name, PAGE_SIZE)
             .then((result) => {
                 if (cancelled) return;
                 setData(result);
@@ -42,6 +43,7 @@ export function PreviewPanel({connName, namespace, name}: Props) {
             });
         return () => {
             cancelled = true;
+            CancelPreview(reqID);
         };
     }, [connName, namespace.join('\x00'), name, reloadKey]);
 

@@ -25,6 +25,7 @@ type App struct {
 	store    *connections.Store
 	keyring  *connections.Keyring
 	registry *catalog.Registry
+	requests *catalog.RequestRegistry
 }
 
 func NewApp() (*App, error) {
@@ -36,6 +37,7 @@ func NewApp() (*App, error) {
 		store:    store,
 		keyring:  connections.NewKeyring(),
 		registry: catalog.NewRegistry(),
+		requests: catalog.NewRequestRegistry(),
 	}, nil
 }
 
@@ -179,12 +181,14 @@ func (a *App) LoadTable(connName string, namespace []string, name string) (*cata
 }
 
 // PreviewTable scans the table and returns up to limit rows as JSON-friendly
-// values. M3a baseline: no filter, no skip, no cancellation. limit ≤ 0
-// defaults to 100 rows.
-func (a *App) PreviewTable(connName string, namespace []string, name string, limit int) (*catalog.PreviewRowsDTO, error) {
+// values. limit ≤ 0 defaults to 100 rows. reqID lets the frontend cancel an
+// in-flight scan via CancelPreview on unmount; pass "" to opt out.
+func (a *App) PreviewTable(reqID, connName string, namespace []string, name string, limit int) (*catalog.PreviewRowsDTO, error) {
 	var dto *catalog.PreviewRowsDTO
 	err := a.withCatalog(connName, "preview table", func(cat *rest.Catalog) error {
-		ctx, cancel := context.WithTimeout(a.ctx, previewTimeout)
+		reqCtx, release := a.requests.Register(a.ctx, reqID)
+		defer release()
+		ctx, cancel := context.WithTimeout(reqCtx, previewTimeout)
 		defer cancel()
 		ident := append(table.Identifier(append([]string(nil), namespace...)), name)
 		tbl, err := cat.LoadTable(ctx, ident)
@@ -195,6 +199,13 @@ func (a *App) PreviewTable(connName string, namespace []string, name string, lim
 		return err
 	})
 	return dto, err
+}
+
+// CancelPreview cancels an in-flight PreviewTable call by its reqID.
+// Idempotent and safe to call on an unknown ID — returns nil either way.
+func (a *App) CancelPreview(reqID string) error {
+	a.requests.Cancel(reqID)
+	return nil
 }
 
 // resolveSecret looks up a saved connection by name and pulls both its
@@ -232,7 +243,9 @@ func (a *App) withCatalog(connName, op string, fn func(*rest.Catalog) error) err
 		return err
 	}
 	if err := a.registry.Do(a.ctx, conn.Name, argsFor(conn, secret, s3Secret), fn); err != nil {
-		wruntime.LogError(a.ctx, op+": "+err.Error())
+		if !errors.Is(err, context.Canceled) {
+			wruntime.LogError(a.ctx, op+": "+err.Error())
+		}
 		return errors.New(catalog.MapError(err))
 	}
 	return nil
