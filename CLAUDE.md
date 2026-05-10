@@ -14,7 +14,7 @@ Early scaffolding. The plan lives in [`PLAN.md`](PLAN.md) — four sequential mi
 - **Backend (Go):** owns all catalog I/O via `iceberg-go`. Exposes a small set of methods to the frontend through Wails bindings. Persists connection definitions to a local JSON file.
 - **Frontend (web):** browsing UI — connection manager, namespace tree, schema/partition/properties panels, row preview. Calls into Go via Wails bindings; never makes catalog requests directly.
 - **Connections:** REST catalogs only for the MVP (Polaris, Lakekeeper). The `Connection` struct carries a `catalog type` field so Glue/SQL/Hive can be added later without reshaping storage — but those backends are out of scope until after M4.
-- **Auth:** Static bearer token, or OAuth2 client credentials with auto-refresh via `iceberg-go` (`rest.WithCredential` + `rest.WithAuthURI` + optional `rest.WithScope`). No anonymous mode, no AWS SigV4.
+- **Auth:** Static bearer token, or OAuth2 client credentials via `iceberg-go` (`rest.WithCredential` + `rest.WithAuthURI` + optional `rest.WithScope`). No anonymous mode, no AWS SigV4.
 - **Delete files:** Rely on `iceberg-go`'s `Scan()` output as-is. Don't add custom positional or equality-delete handling; document gaps in the README instead.
 
 ## Gotchas worth remembering
@@ -23,6 +23,7 @@ Early scaffolding. The plan lives in [`PLAN.md`](PLAN.md) — four sequential mi
 - **Arrow → JSON for row preview.** `iceberg-go` returns Arrow record batches. For v1, serialize to `[]map[string]any`. Coerce explicitly: decimals → string, timestamps → ISO-8601 string, bytes → base64. Don't rely on default `encoding/json` behavior for these.
 - **Null is not empty.** Null cells must render visually distinct from empty strings in the preview table.
 - **Lazy tree, no re-fetch.** The namespace tree loads children on expand and must not re-fetch already-loaded nodes when collapsed/re-expanded.
+- **OAuth2 token refresh is on us, not iceberg-go.** `iceberg-go` v0.5.0's `Oauth2AuthManager` fetches a token once and caches it on the struct forever — `expires_in` is decoded but ignored, refresh tokens are never used, and there is no 401 re-auth path. After the access token expires, every cached `*rest.Catalog` keeps sending the stale bearer until the app restarts. Fixed upstream in `apache/iceberg-go@6842055` (PR #793, "feat(catalog): refresh oauth tokens") but **not** in any tagged release as of v0.5.0. We work around it reactively in `Registry.Do` (`internal/catalog/registry.go`): on `rest.ErrUnauthorized` / `rest.ErrAuthorizationExpired` we invalidate the cached catalog and retry once, which forces a fresh token fetch. We are intentionally **not** maintaining a fork of `iceberg-go` for this project (different org). Revisit when an upstream release ships the fix and the workaround can be removed.
 
 ## Layout
 
@@ -38,7 +39,7 @@ wails build -tags webkit2_41 -platform linux/amd64
 ## Layout
 
 - `main.go` — `wails.Run` config, theme defaults
-- `app.go` — `App` struct + Wails-bound methods (`ListConnections`, `SaveConnection`, `DeleteConnection`, `TestConnection`, `TestSavedConnection`)
+- `app.go` — `App` struct + Wails-bound methods (`ListConnections`, `SaveConnection`, `DeleteConnection`, `TestConnection`, `TestSavedConnection`, `ListNamespaces`, `ListTables`, `LoadTable`, `PreviewTable`); `withCatalog` helper threads requests through `Registry.Do`
 - `internal/connections/` — `Connection` type, JSON metadata store, OS keyring wrapper
 - `internal/catalog/` — `iceberg-go` REST probe + error→user-message mapping
 - `frontend/src/` — React/TS UI; `frontend/wailsjs/` is regenerated and gitignored

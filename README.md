@@ -44,7 +44,7 @@ wails build -platform windows/amd64
 The app supports two auth modes for REST catalogs:
 
 - **Bearer token** — paste a static token. Useful for catalogs without an auth server, or for short-lived manual testing.
-- **OAuth2 client credentials** — the app fetches and refreshes tokens automatically via your auth server (e.g. Keycloak). Recommended for any real environment.
+- **OAuth2 client credentials** — the app fetches a token from your auth server (e.g. Keycloak) on first use and re-fetches it after expiry. Recommended for any real environment.
 
 ### Quickstart: bearer token
 
@@ -85,5 +85,5 @@ The app follows your OS dark/light preference automatically via `prefers-color-s
 ## Scope (M1)
 
 - REST catalog only (Polaris/Lakekeeper). Glue/Hive/SQL backends are deferred.
-- Auth: static bearer token, or OAuth2 client credentials with auto-refresh. AWS SigV4 deferred.
+- Auth: static bearer token, or OAuth2 client credentials (token re-fetched on expiry). AWS SigV4 deferred.
 - Row preview, schema browsing, etc. land in later milestones.

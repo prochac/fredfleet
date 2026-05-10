@@ -116,92 +116,85 @@ func (a *App) TestSavedConnection(name string) error {
 // ListNamespaces lists child namespaces of parent for the given saved
 // connection. parent may be nil or empty for top-level namespaces.
 func (a *App) ListNamespaces(connName string, parent []string) ([]catalog.NamespaceDTO, error) {
-	cat, err := a.getCatalog(connName)
-	if err != nil {
-		return nil, err
-	}
-	ctx, cancel := context.WithTimeout(a.ctx, listTimeout)
-	defer cancel()
-	idents, err := cat.ListNamespaces(ctx, table.Identifier(parent))
-	if err != nil {
-		wruntime.LogError(a.ctx, "list namespaces: "+err.Error())
-		return nil, errors.New(catalog.MapError(err))
-	}
-	out := make([]catalog.NamespaceDTO, 0, len(idents))
-	for _, id := range idents {
-		path := append([]string(nil), id...)
-		name := ""
-		if n := len(path); n > 0 {
-			name = path[n-1]
+	var out []catalog.NamespaceDTO
+	err := a.withCatalog(connName, "list namespaces", func(cat *rest.Catalog) error {
+		ctx, cancel := context.WithTimeout(a.ctx, listTimeout)
+		defer cancel()
+		idents, err := cat.ListNamespaces(ctx, table.Identifier(parent))
+		if err != nil {
+			return err
 		}
-		out = append(out, catalog.NamespaceDTO{Path: path, Name: name})
-	}
-	return out, nil
+		out = make([]catalog.NamespaceDTO, 0, len(idents))
+		for _, id := range idents {
+			path := append([]string(nil), id...)
+			name := ""
+			if n := len(path); n > 0 {
+				name = path[n-1]
+			}
+			out = append(out, catalog.NamespaceDTO{Path: path, Name: name})
+		}
+		return nil
+	})
+	return out, err
 }
 
 // ListTables lists tables in a namespace for the given saved connection.
 func (a *App) ListTables(connName string, namespace []string) ([]catalog.TableDTO, error) {
-	cat, err := a.getCatalog(connName)
-	if err != nil {
-		return nil, err
-	}
-	ctx, cancel := context.WithTimeout(a.ctx, listTimeout)
-	defer cancel()
-	out := []catalog.TableDTO{}
-	for ident, iterErr := range cat.ListTables(ctx, table.Identifier(namespace)) {
-		if iterErr != nil {
-			wruntime.LogError(a.ctx, "list tables: "+iterErr.Error())
-			return nil, errors.New(catalog.MapError(iterErr))
+	var out []catalog.TableDTO
+	err := a.withCatalog(connName, "list tables", func(cat *rest.Catalog) error {
+		ctx, cancel := context.WithTimeout(a.ctx, listTimeout)
+		defer cancel()
+		out = []catalog.TableDTO{}
+		for ident, iterErr := range cat.ListTables(ctx, table.Identifier(namespace)) {
+			if iterErr != nil {
+				return iterErr
+			}
+			if len(ident) == 0 {
+				continue
+			}
+			ns := append([]string(nil), ident[:len(ident)-1]...)
+			out = append(out, catalog.TableDTO{Namespace: ns, Name: ident[len(ident)-1]})
 		}
-		if len(ident) == 0 {
-			continue
-		}
-		ns := append([]string(nil), ident[:len(ident)-1]...)
-		out = append(out, catalog.TableDTO{Namespace: ns, Name: ident[len(ident)-1]})
-	}
-	return out, nil
+		return nil
+	})
+	return out, err
 }
 
 // LoadTable loads a single table's metadata, partition spec, and properties.
 func (a *App) LoadTable(connName string, namespace []string, name string) (*catalog.TableMetadataDTO, error) {
-	cat, err := a.getCatalog(connName)
-	if err != nil {
-		return nil, err
-	}
-	ctx, cancel := context.WithTimeout(a.ctx, loadTimeout)
-	defer cancel()
-	ident := append(table.Identifier(append([]string(nil), namespace...)), name)
-	tbl, err := cat.LoadTable(ctx, ident)
-	if err != nil {
-		wruntime.LogError(a.ctx, "load table: "+err.Error())
-		return nil, errors.New(catalog.MapError(err))
-	}
-	dto := catalog.BuildTableMetadataDTO(namespace, name, tbl)
-	return &dto, nil
+	var dto *catalog.TableMetadataDTO
+	err := a.withCatalog(connName, "load table", func(cat *rest.Catalog) error {
+		ctx, cancel := context.WithTimeout(a.ctx, loadTimeout)
+		defer cancel()
+		ident := append(table.Identifier(append([]string(nil), namespace...)), name)
+		tbl, err := cat.LoadTable(ctx, ident)
+		if err != nil {
+			return err
+		}
+		out := catalog.BuildTableMetadataDTO(namespace, name, tbl)
+		dto = &out
+		return nil
+	})
+	return dto, err
 }
 
 // PreviewTable scans the table and returns up to limit rows as JSON-friendly
 // values. M3a baseline: no filter, no skip, no cancellation. limit ≤ 0
 // defaults to 100 rows.
 func (a *App) PreviewTable(connName string, namespace []string, name string, limit int) (*catalog.PreviewRowsDTO, error) {
-	cat, err := a.getCatalog(connName)
-	if err != nil {
-		return nil, err
-	}
-	ctx, cancel := context.WithTimeout(a.ctx, previewTimeout)
-	defer cancel()
-	ident := append(table.Identifier(append([]string(nil), namespace...)), name)
-	tbl, err := cat.LoadTable(ctx, ident)
-	if err != nil {
-		wruntime.LogError(a.ctx, "preview table: "+err.Error())
-		return nil, errors.New(catalog.MapError(err))
-	}
-	dto, err := catalog.BuildPreviewRows(ctx, tbl, limit)
-	if err != nil {
-		wruntime.LogError(a.ctx, "preview rows: "+err.Error())
-		return nil, errors.New(catalog.MapError(err))
-	}
-	return dto, nil
+	var dto *catalog.PreviewRowsDTO
+	err := a.withCatalog(connName, "preview table", func(cat *rest.Catalog) error {
+		ctx, cancel := context.WithTimeout(a.ctx, previewTimeout)
+		defer cancel()
+		ident := append(table.Identifier(append([]string(nil), namespace...)), name)
+		tbl, err := cat.LoadTable(ctx, ident)
+		if err != nil {
+			return err
+		}
+		dto, err = catalog.BuildPreviewRows(ctx, tbl, limit)
+		return err
+	})
+	return dto, err
 }
 
 // resolveSecret looks up a saved connection by name and pulls both its
@@ -230,19 +223,19 @@ func (a *App) resolveSecret(name string) (connections.Connection, string, string
 	return connections.Connection{}, "", "", errors.New("Connection not found: " + name)
 }
 
-// getCatalog resolves the connection by name and returns a (possibly cached)
-// connected REST catalog. Errors come back already wrapped for UI display.
-func (a *App) getCatalog(connName string) (*rest.Catalog, error) {
+// withCatalog resolves the connection by name, runs fn against the cached
+// REST catalog, and on auth-expired errors invalidates and retries once. The
+// op string is used for log prefixing only. Errors are wrapped for UI display.
+func (a *App) withCatalog(connName, op string, fn func(*rest.Catalog) error) error {
 	conn, secret, s3Secret, err := a.resolveSecret(connName)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	cat, err := a.registry.Get(a.ctx, conn.Name, argsFor(conn, secret, s3Secret))
-	if err != nil {
-		wruntime.LogError(a.ctx, "open catalog: "+err.Error())
-		return nil, errors.New(catalog.MapError(err))
+	if err := a.registry.Do(a.ctx, conn.Name, argsFor(conn, secret, s3Secret), fn); err != nil {
+		wruntime.LogError(a.ctx, op+": "+err.Error())
+		return errors.New(catalog.MapError(err))
 	}
-	return cat, nil
+	return nil
 }
 
 func argsFor(c connections.Connection, secret, s3Secret string) catalog.Args {

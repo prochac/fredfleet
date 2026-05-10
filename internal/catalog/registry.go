@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"strings"
 	"sync"
 
@@ -56,6 +57,39 @@ func (r *Registry) Invalidate(name string) {
 	r.mu.Lock()
 	delete(r.cats, name)
 	r.mu.Unlock()
+}
+
+// Do runs fn against a connected catalog. If fn returns an auth-expired
+// error, the cached catalog is dropped, rebuilt, and fn is retried once.
+//
+// Workaround for an iceberg-go v0.5.0 bug: Oauth2AuthManager fetches a token
+// once on first use and caches it on the struct forever — expires_in is
+// decoded but ignored, refresh_token is never used, and there is no 401
+// re-auth path. Fixed upstream in apache/iceberg-go@6842055
+// ("feat(catalog): refresh oauth tokens", PR #793) but not yet in any tagged
+// release. Rebuilding the *rest.Catalog forces a fresh token fetch.
+//
+// For static bearer auth this still issues the (futile) retry once, then
+// surfaces the same error — harmless.
+func (r *Registry) Do(ctx context.Context, name string, args Args, fn func(*rest.Catalog) error) error {
+	cat, err := r.Get(ctx, name, args)
+	if err != nil {
+		return err
+	}
+	err = fn(cat)
+	if err == nil || !isAuthExpired(err) {
+		return err
+	}
+	r.Invalidate(name)
+	cat, err = r.Get(ctx, name, args)
+	if err != nil {
+		return err
+	}
+	return fn(cat)
+}
+
+func isAuthExpired(err error) bool {
+	return errors.Is(err, rest.ErrUnauthorized) || errors.Is(err, rest.ErrAuthorizationExpired)
 }
 
 func fingerprint(a Args) string {
