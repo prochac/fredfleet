@@ -66,8 +66,11 @@ func fingerprint(a Args) string {
 		a.AuthURL,
 		a.ClientID,
 		a.Scope,
+		a.S3AccessKeyID,
+		a.S3Region,
+		a.S3Endpoint,
 	}
-	sum := sha256.Sum256([]byte(a.Secret))
+	sum := sha256.Sum256([]byte(a.Secret + "\x00" + a.S3SecretAccessKey))
 	parts = append(parts, hex.EncodeToString(sum[:]))
 	return strings.Join(parts, "|")
 }

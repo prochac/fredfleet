@@ -31,14 +31,19 @@ export function ConnectionFormModal({mode, initial, existingNames, onSaved, onCa
     const [clientID, setClientID] = useState(initial?.auth?.clientId ?? '');
     const [scope, setScope] = useState(initial?.auth?.scope ?? '');
     const [secret, setSecret] = useState('');
+    const [s3AccessKeyID, setS3AccessKeyID] = useState(initial?.s3?.accessKeyId ?? '');
+    const [s3Region, setS3Region] = useState(initial?.s3?.region ?? '');
+    const [s3Endpoint, setS3Endpoint] = useState(initial?.s3?.endpoint ?? '');
+    const [s3Secret, setS3Secret] = useState('');
     const [status, setStatus] = useState<Status>({kind: 'idle'});
 
     const isEdit = mode === 'edit';
     // In edit mode, leaving the secret blank keeps whatever's in the keyring.
     const secretRequired = !isEdit;
+    const hasS3Config = !!(s3AccessKeyID.trim() || s3Region.trim() || s3Endpoint.trim() || s3Secret);
 
     function buildConnection(): connections.Connection {
-        return connections.Connection.createFrom({
+        const conn: any = {
             name: name.trim(),
             type: 'rest',
             url: url.trim(),
@@ -49,7 +54,15 @@ export function ConnectionFormModal({mode, initial, existingNames, onSaved, onCa
                 clientId: authKind === AUTH_OAUTH2 ? clientID.trim() : '',
                 scope: authKind === AUTH_OAUTH2 ? scope.trim() : '',
             },
-        });
+        };
+        if (hasS3Config) {
+            conn.s3 = {
+                accessKeyId: s3AccessKeyID.trim(),
+                region: s3Region.trim(),
+                endpoint: s3Endpoint.trim(),
+            };
+        }
+        return connections.Connection.createFrom(conn);
     }
 
     function validate(): string | null {
@@ -65,6 +78,14 @@ export function ConnectionFormModal({mode, initial, existingNames, onSaved, onCa
         if (secretRequired && !secret) {
             return authKind === AUTH_OAUTH2 ? 'Client secret is required.' : 'Bearer token is required.';
         }
+        // S3 section: if any field is set, access-key-id is required (the secret
+        // can be left blank in edit mode to reuse what's in the keyring).
+        if (hasS3Config && !s3AccessKeyID.trim()) {
+            return 'S3 access key ID is required when storage credentials are set.';
+        }
+        if (!isEdit && hasS3Config && !s3Secret) {
+            return 'S3 secret access key is required when storage credentials are set.';
+        }
         return null;
     }
 
@@ -76,7 +97,7 @@ export function ConnectionFormModal({mode, initial, existingNames, onSaved, onCa
         }
         setStatus({kind: 'testing'});
         try {
-            await TestConnection(buildConnection(), secret);
+            await TestConnection(buildConnection(), secret, s3Secret);
             setStatus({kind: 'ok', message: 'Connection succeeded.'});
         } catch (e) {
             setStatus({kind: 'error', message: errorMessage(e)});
@@ -91,7 +112,7 @@ export function ConnectionFormModal({mode, initial, existingNames, onSaved, onCa
         }
         setStatus({kind: 'saving'});
         try {
-            await SaveConnection(buildConnection(), secret);
+            await SaveConnection(buildConnection(), secret, s3Secret);
             onSaved();
         } catch (e) {
             setStatus({kind: 'error', message: errorMessage(e)});
@@ -199,6 +220,49 @@ export function ConnectionFormModal({mode, initial, existingNames, onSaved, onCa
                             required={secretRequired}
                         />
                     </label>
+
+                    <fieldset className="form-section">
+                        <legend>Storage credentials <span className="hint">(optional — only when the catalog does not vend S3 credentials)</span></legend>
+                        <label>
+                            S3 access key ID
+                            <input
+                                type="text"
+                                value={s3AccessKeyID}
+                                onChange={(e) => setS3AccessKeyID(e.target.value)}
+                                autoComplete="off"
+                                placeholder="AKIA…  /  minioadmin"
+                            />
+                        </label>
+                        <label>
+                            S3 secret access key{isEdit && <span className="hint"> (leave blank to keep existing)</span>}
+                            <input
+                                type="password"
+                                value={s3Secret}
+                                onChange={(e) => setS3Secret(e.target.value)}
+                                autoComplete="off"
+                            />
+                        </label>
+                        <label>
+                            Region
+                            <input
+                                type="text"
+                                value={s3Region}
+                                onChange={(e) => setS3Region(e.target.value)}
+                                autoComplete="off"
+                                placeholder="us-east-1"
+                            />
+                        </label>
+                        <label>
+                            Endpoint <span className="hint">(MinIO or S3-compatible)</span>
+                            <input
+                                type="url"
+                                value={s3Endpoint}
+                                onChange={(e) => setS3Endpoint(e.target.value)}
+                                autoComplete="off"
+                                placeholder="http://localhost:9000"
+                            />
+                        </label>
+                    </fieldset>
 
                     {status.kind === 'ok' && <p className="status ok">{status.message}</p>}
                     {status.kind === 'error' && <p className="status error">{status.message}</p>}

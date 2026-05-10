@@ -47,11 +47,14 @@ func (a *App) ListConnections() ([]connections.Connection, error) {
 	return a.store.List()
 }
 
-// SaveConnection upserts a connection by name. The secret (bearer token or
-// OAuth2 client_secret depending on Auth.Kind) is written to the OS keyring;
-// the metadata file never sees it. Pass an empty secret to keep the existing
-// keyring entry untouched (useful when editing).
-func (a *App) SaveConnection(c connections.Connection, secret string) error {
+// SaveConnection upserts a connection by name. Two secrets are passed
+// separately and written to the OS keyring; the metadata file never sees
+// either. Pass an empty string for any secret to keep the existing keyring
+// entry untouched (useful when editing).
+//
+//   secret    — bearer token or OAuth2 client_secret, depending on Auth.Kind.
+//   s3Secret  — optional S3 secret access key, only used when c.S3 is set.
+func (a *App) SaveConnection(c connections.Connection, secret, s3Secret string) error {
 	if err := a.store.Save(c); err != nil {
 		wruntime.LogError(a.ctx, "save connection: "+err.Error())
 		return errors.New("Failed to save connection: " + err.Error())
@@ -60,6 +63,12 @@ func (a *App) SaveConnection(c connections.Connection, secret string) error {
 		if err := a.keyring.Set(c.Name, secret); err != nil {
 			wruntime.LogError(a.ctx, "save secret: "+err.Error())
 			return errors.New("Failed to save secret in OS keyring: " + err.Error())
+		}
+	}
+	if s3Secret != "" {
+		if err := a.keyring.SetS3(c.Name, s3Secret); err != nil {
+			wruntime.LogError(a.ctx, "save s3 secret: "+err.Error())
+			return errors.New("Failed to save S3 secret in OS keyring: " + err.Error())
 		}
 	}
 	a.registry.Invalidate(c.Name)
@@ -74,17 +83,20 @@ func (a *App) DeleteConnection(name string) error {
 	if err := a.keyring.Delete(name); err != nil {
 		wruntime.LogError(a.ctx, "delete secret: "+err.Error())
 	}
+	if err := a.keyring.DeleteS3(name); err != nil {
+		wruntime.LogError(a.ctx, "delete s3 secret: "+err.Error())
+	}
 	a.registry.Invalidate(name)
 	return nil
 }
 
 // TestConnection probes the catalog using the supplied connection metadata
-// and secret. The keyring is not consulted, so a user can test edits before
+// and secrets. The keyring is not consulted, so a user can test edits before
 // saving.
-func (a *App) TestConnection(c connections.Connection, secret string) error {
+func (a *App) TestConnection(c connections.Connection, secret, s3Secret string) error {
 	ctx, cancel := context.WithTimeout(a.ctx, probeTimeout)
 	defer cancel()
-	if err := catalog.Probe(ctx, c.Name, argsFor(c, secret)); err != nil {
+	if err := catalog.Probe(ctx, c.Name, argsFor(c, secret, s3Secret)); err != nil {
 		wruntime.LogError(a.ctx, "probe catalog: "+err.Error())
 		return errors.New(catalog.MapError(err))
 	}
@@ -92,13 +104,13 @@ func (a *App) TestConnection(c connections.Connection, secret string) error {
 }
 
 // TestSavedConnection probes a previously-saved connection by name, fetching
-// its secret from the OS keyring.
+// its secrets from the OS keyring.
 func (a *App) TestSavedConnection(name string) error {
-	conn, secret, err := a.resolveSecret(name)
+	conn, secret, s3Secret, err := a.resolveSecret(name)
 	if err != nil {
 		return err
 	}
-	return a.TestConnection(conn, secret)
+	return a.TestConnection(conn, secret, s3Secret)
 }
 
 // ListNamespaces lists child namespaces of parent for the given saved
@@ -192,34 +204,40 @@ func (a *App) PreviewTable(connName string, namespace []string, name string, lim
 	return dto, nil
 }
 
-// resolveSecret looks up a saved connection by name and pulls its secret from
-// the OS keyring. Returns the connection, secret, and a user-friendly error.
-func (a *App) resolveSecret(name string) (connections.Connection, string, error) {
+// resolveSecret looks up a saved connection by name and pulls both its
+// catalog secret and (if configured) S3 secret access key from the OS keyring.
+func (a *App) resolveSecret(name string) (connections.Connection, string, string, error) {
 	conns, err := a.store.List()
 	if err != nil {
-		return connections.Connection{}, "", errors.New("Failed to read connections: " + err.Error())
+		return connections.Connection{}, "", "", errors.New("Failed to read connections: " + err.Error())
 	}
 	for i := range conns {
-		if conns[i].Name == name {
-			secret, err := a.keyring.Get(name)
-			if err != nil {
-				wruntime.LogError(a.ctx, "read secret: "+err.Error())
-				return connections.Connection{}, "", errors.New("Failed to read secret from keyring: " + err.Error())
-			}
-			return conns[i], secret, nil
+		if conns[i].Name != name {
+			continue
 		}
+		secret, err := a.keyring.Get(name)
+		if err != nil {
+			wruntime.LogError(a.ctx, "read secret: "+err.Error())
+			return connections.Connection{}, "", "", errors.New("Failed to read secret from keyring: " + err.Error())
+		}
+		s3Secret, err := a.keyring.GetS3(name)
+		if err != nil {
+			wruntime.LogError(a.ctx, "read s3 secret: "+err.Error())
+			return connections.Connection{}, "", "", errors.New("Failed to read S3 secret from keyring: " + err.Error())
+		}
+		return conns[i], secret, s3Secret, nil
 	}
-	return connections.Connection{}, "", errors.New("Connection not found: " + name)
+	return connections.Connection{}, "", "", errors.New("Connection not found: " + name)
 }
 
 // getCatalog resolves the connection by name and returns a (possibly cached)
 // connected REST catalog. Errors come back already wrapped for UI display.
 func (a *App) getCatalog(connName string) (*rest.Catalog, error) {
-	conn, secret, err := a.resolveSecret(connName)
+	conn, secret, s3Secret, err := a.resolveSecret(connName)
 	if err != nil {
 		return nil, err
 	}
-	cat, err := a.registry.Get(a.ctx, conn.Name, argsFor(conn, secret))
+	cat, err := a.registry.Get(a.ctx, conn.Name, argsFor(conn, secret, s3Secret))
 	if err != nil {
 		wruntime.LogError(a.ctx, "open catalog: "+err.Error())
 		return nil, errors.New(catalog.MapError(err))
@@ -227,8 +245,8 @@ func (a *App) getCatalog(connName string) (*rest.Catalog, error) {
 	return cat, nil
 }
 
-func argsFor(c connections.Connection, secret string) catalog.Args {
-	return catalog.Args{
+func argsFor(c connections.Connection, secret, s3Secret string) catalog.Args {
+	args := catalog.Args{
 		URI:       c.URL,
 		Warehouse: c.Warehouse,
 		AuthKind:  c.Auth.Kind,
@@ -237,4 +255,11 @@ func argsFor(c connections.Connection, secret string) catalog.Args {
 		ClientID:  c.Auth.ClientID,
 		Scope:     c.Auth.Scope,
 	}
+	if c.S3 != nil {
+		args.S3AccessKeyID = c.S3.AccessKeyID
+		args.S3SecretAccessKey = s3Secret
+		args.S3Region = c.S3.Region
+		args.S3Endpoint = c.S3.Endpoint
+	}
+	return args
 }

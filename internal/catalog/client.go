@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/url"
 
+	"github.com/apache/iceberg-go"
 	"github.com/apache/iceberg-go/catalog/rest"
+	iceio "github.com/apache/iceberg-go/io"
 	"github.com/apache/iceberg-go/table"
 )
 
@@ -25,6 +27,14 @@ type Args struct {
 	AuthURL  string
 	ClientID string
 	Scope    string
+
+	// Optional explicit S3 credentials. Used when the catalog does not vend
+	// credentials. Passed through to iceberg-go via rest.WithAdditionalProps
+	// so the gocloud S3 factory picks them up at scan time.
+	S3AccessKeyID     string
+	S3SecretAccessKey string
+	S3Region          string
+	S3Endpoint        string
 }
 
 // Open builds a connected *rest.Catalog using the supplied args. The caller
@@ -61,6 +71,9 @@ func buildOptions(args Args) ([]rest.Option, error) {
 	if args.Warehouse != "" {
 		opts = append(opts, rest.WithWarehouseLocation(args.Warehouse))
 	}
+	if props := s3Props(args); len(props) > 0 {
+		opts = append(opts, rest.WithAdditionalProps(props))
+	}
 	switch args.AuthKind {
 	case AuthBearer:
 		if args.Secret != "" {
@@ -92,4 +105,21 @@ func buildOptions(args Args) ([]rest.Option, error) {
 	default:
 		return nil, fmt.Errorf("unsupported auth kind: %q", args.AuthKind)
 	}
+}
+
+func s3Props(args Args) iceberg.Properties {
+	props := iceberg.Properties{}
+	if args.S3AccessKeyID != "" {
+		props[iceio.S3AccessKeyID] = args.S3AccessKeyID
+	}
+	if args.S3SecretAccessKey != "" {
+		props[iceio.S3SecretAccessKey] = args.S3SecretAccessKey
+	}
+	if args.S3Region != "" {
+		props[iceio.S3Region] = args.S3Region
+	}
+	if args.S3Endpoint != "" {
+		props[iceio.S3EndpointURL] = args.S3Endpoint
+	}
+	return props
 }

@@ -383,6 +383,18 @@ tr:hover td { background: var(--row-hover); }
     justify-content: flex-end;
     margin-top: 16px;
 }
+.form-section {
+    margin-top: 12px;
+    padding: 8px 12px 4px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+.form-section > legend {
+    padding: 0 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--fg-muted);
+}
 
 .preview-table {
     width: 100%;
