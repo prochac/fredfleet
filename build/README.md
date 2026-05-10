@@ -8,6 +8,20 @@ The structure is:
 * darwin - macOS specific files
 * windows - Windows specific files
 
+## Replacing the app icon
+
+`appicon.png` is the source of truth. macOS `iconfile.icns` is generated from it
+automatically on every `wails build`. To swap the icon project-wide:
+
+1. Replace `appicon.png` with a 1024×1024 PNG.
+2. Regenerate `windows/icon.ico` with multiple resolutions:
+   ```bash
+   magick appicon.png \
+     -define icon:auto-resize=256,128,64,48,32,16 \
+     windows/icon.ico
+   ```
+3. Rebuild.
+
 ## Mac
 
 The `darwin` directory holds files specific to Mac builds.

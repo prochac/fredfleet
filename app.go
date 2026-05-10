@@ -10,6 +10,7 @@ import (
 
 	"github.com/prochac/fredfleet/internal/catalog"
 	"github.com/prochac/fredfleet/internal/connections"
+	"github.com/prochac/fredfleet/internal/desktopentry"
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -26,9 +27,10 @@ type App struct {
 	keyring  *connections.Keyring
 	registry *catalog.Registry
 	requests *catalog.RequestRegistry
+	icon     []byte
 }
 
-func NewApp() (*App, error) {
+func NewApp(icon []byte) (*App, error) {
 	store, err := connections.NewStore()
 	if err != nil {
 		return nil, err
@@ -38,11 +40,13 @@ func NewApp() (*App, error) {
 		keyring:  connections.NewKeyring(),
 		registry: catalog.NewRegistry(),
 		requests: catalog.NewRequestRegistry(),
+		icon:     icon,
 	}, nil
 }
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	go desktopentry.Ensure(ctx, a.icon)
 }
 
 func (a *App) ListConnections() ([]connections.Connection, error) {

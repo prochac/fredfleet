@@ -1,6 +1,8 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
+import {Toaster} from 'sonner';
 import {connections} from '../wailsjs/go/models';
 import {DeleteConnection, ListConnections} from '../wailsjs/go/main/App';
+import {WindowSetTitle} from '../wailsjs/runtime/runtime';
 import {ConnectionList} from './components/ConnectionList';
 import {ConnectionFormModal} from './components/ConnectionFormModal';
 import {ConfirmDialog} from './components/ConfirmDialog';
@@ -8,6 +10,7 @@ import {Sidebar} from './components/Sidebar';
 import {TableMetadataPanel} from './components/TableMetadataPanel';
 import type {TreePath} from './state/treeStore';
 import {initTheme} from './theme';
+import {toastError} from './toast';
 
 type ModalState =
     | {kind: 'none'}
@@ -20,7 +23,6 @@ type SelectedTable = {namespace: TreePath; name: string} | null;
 
 export default function App() {
     const [items, setItems] = useState<connections.Connection[]>([]);
-    const [loadError, setLoadError] = useState<string | null>(null);
     const [modal, setModal] = useState<ModalState>({kind: 'none'});
     const [selectedConnection, setSelectedConnection] = useState<string | null>(null);
     const [selectedTable, setSelectedTable] = useState<SelectedTable>(null);
@@ -51,13 +53,12 @@ export default function App() {
             const list = await ListConnections();
             const next = list ?? [];
             setItems(next);
-            setLoadError(null);
             setSelectedConnection((curr) => {
                 if (curr && next.some((c) => c.name === curr)) return curr;
                 return next.length > 0 ? next[0].name : null;
             });
         } catch (e) {
-            setLoadError(errorMessage(e));
+            toastError(e, 'Failed to load connections');
         }
     }, []);
 
@@ -66,6 +67,12 @@ export default function App() {
         refresh();
         return cleanup;
     }, [refresh]);
+
+    useEffect(() => {
+        const t = selectedConnection ? `fredfleet — ${selectedConnection}` : 'fredfleet';
+        WindowSetTitle(t);
+        document.title = t;
+    }, [selectedConnection]);
 
     async function handleConfirmDelete(name: string) {
         try {
@@ -77,7 +84,7 @@ export default function App() {
             }
             refresh();
         } catch (e) {
-            setLoadError(errorMessage(e));
+            toastError(e, 'Failed to delete connection');
             setModal({kind: 'none'});
         }
     }
@@ -99,7 +106,6 @@ export default function App() {
                 key={selectedConnection ?? '__none__'}
             />
             <main className="main" ref={mainRef}>
-                {loadError && <p className="status error global">{loadError}</p>}
                 {selectedConnection && selectedTable ? (
                     <TableMetadataPanel
                         connName={selectedConnection}
@@ -163,6 +169,8 @@ export default function App() {
                     onCancel={() => setModal({kind: 'manage'})}
                 />
             )}
+
+            <Toaster richColors position="bottom-right" theme="system" />
         </div>
     );
 }
@@ -179,8 +187,3 @@ function EmptyState({hasConnection}: {hasConnection: boolean}) {
     );
 }
 
-function errorMessage(e: unknown): string {
-    if (typeof e === 'string') return e;
-    if (e instanceof Error) return e.message;
-    return String(e);
-}

@@ -2,42 +2,39 @@
 
 Desktop app for browsing Apache Iceberg catalogs. Built with [Wails v2](https://wails.io) (Go backend + React/TypeScript frontend) on top of [`iceberg-go`](https://github.com/apache/iceberg-go).
 
-Status: M3 — connection manager, namespace tree, schema viewer, and row preview with filters and pagination. See [`PLAN.md`](PLAN.md).
+Status: M4 — connection manager, namespace tree, schema viewer, row preview with filters and pagination, error toasts, and signed-by-omission release builds. See [`PLAN.md`](PLAN.md).
 
-## Prerequisites
+## Install
 
-- Go 1.26+
-- Node.js / npm
-- [Wails CLI v2](https://wails.io/docs/gettingstarted/installation): `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
-- Platform deps for Wails (run `wails doctor` to check):
-  - **Linux**: WebKit2GTK 4.1, GTK 3, libgcc, pkg-config — on Arch: `sudo pacman -S webkit2gtk-4.1 gtk3`
-  - **macOS**: Xcode command-line tools
-  - **Windows**: WebView2 runtime (preinstalled on Win11)
-- Token storage backend (Linux only): a Secret Service implementation must be running. GNOME Keyring, KWallet, or KeePassXC all work.
+Download the latest binary from the [GitHub Releases page](https://github.com/prochac/fredfleet/releases/latest).
 
-## First clone
+### macOS (Apple silicon and Intel)
 
-The `frontend/wailsjs/` directory is gitignored because it's regenerated on every `wails dev`/`wails build`. After cloning, run `wails dev` once before TypeScript imports will resolve.
-
-## Daily workflow
+The release ships a single universal binary. Releases are **unsigned**, so Gatekeeper will refuse to launch the app until you remove the quarantine attribute:
 
 ```bash
-wails dev      # hot-reload Go + Vite, opens devtools
-wails build    # production binary in build/bin/
+unzip fredfleet-*-darwin-universal.zip
+mv fredfleet.app /Applications/
+xattr -d com.apple.quarantine /Applications/fredfleet.app
+open /Applications/fredfleet.app
 ```
 
-**On Linux (Arch and other distros that ship webkit2gtk-4.1):** add `-tags webkit2_41`. Wails 2.12 defaults to the older 4.0 ABI.
+### Linux (amd64)
 
 ```bash
-wails dev   -tags webkit2_41
-wails build -tags webkit2_41 -platform linux/amd64
+tar xzf fredfleet-*-linux-amd64.tar.gz
+chmod +x fredfleet
+./fredfleet
 ```
 
-Single-target build for other OSes:
-```bash
-wails build -platform darwin/arm64
-wails build -platform windows/amd64
-```
+Runtime requirements: WebKit2GTK 4.1, GTK 3, and a Secret Service implementation (GNOME Keyring, KWallet, KeePassXC, …) for token storage.
+
+- Arch: `sudo pacman -S webkit2gtk-4.1 gtk3 libsecret`
+- Debian/Ubuntu 24.04+: `sudo apt install libwebkit2gtk-4.1-0 libgtk-3-0 libsecret-1-0 gnome-keyring`
+
+### Windows (amd64)
+
+Unzip and run `fredfleet.exe`. SmartScreen will warn the first time — click **More info → Run anyway**. WebView2 is preinstalled on Windows 11; on Windows 10 install the [Evergreen WebView2 runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/).
 
 ## Configure a connection
 
@@ -86,6 +83,8 @@ The app follows your OS dark/light preference automatically via `prefers-color-s
 
 Selecting a table loads the first page of rows alongside the schema and partition spec. The preview panel offers a filter bar, a page-size selector (100 / 250 / 500), client-side prev/next navigation over the loaded buffer, and a **Load more** button to append the next page.
 
+Transient errors during refresh, filter changes, or **Load more** appear as toasts in the bottom-right corner — the previously-loaded rows stay visible so you can retry without losing the buffer. Errors on the first load (no data yet) show inline with a retry button.
+
 ### Filters
 
 Filters are pushed down to the iceberg-go scan (server-side). Multiple filters are AND-combined.
@@ -113,3 +112,40 @@ Each fetch is **scan-and-discard**: the server iterates the Arrow stream from ro
 - **Catalog backends:** REST only (Polaris, Lakekeeper). Glue/Hive/SQL are deferred until after M4.
 - **Auth:** static bearer token, or OAuth2 client credentials (token re-fetched reactively on 401). AWS SigV4 deferred.
 - **Delete files:** whatever `iceberg-go`'s `Scan()` returns. No custom positional/equality-delete handling.
+
+## Build from source
+
+### Prerequisites
+
+- Go 1.26+ (matches `go.mod`)
+- Node.js 20+ / npm
+- [Wails CLI v2.12.0](https://wails.io/docs/gettingstarted/installation): `go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0`
+- Platform deps for Wails (run `wails doctor` to check):
+  - **Linux**: WebKit2GTK 4.1, GTK 3, libgcc, pkg-config — on Arch: `sudo pacman -S webkit2gtk-4.1 gtk3`; on Debian/Ubuntu 24.04+: `sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev pkg-config`
+  - **macOS**: Xcode command-line tools
+  - **Windows**: WebView2 runtime (preinstalled on Win11)
+
+### First clone
+
+The `frontend/wailsjs/` directory is gitignored because it's regenerated on every `wails dev` / `wails build`. After cloning, run `wails dev` once before TypeScript imports will resolve.
+
+### Daily workflow
+
+```bash
+wails dev      # hot-reload Go + Vite, opens devtools
+wails build    # production binary in build/bin/
+```
+
+**On Linux (Arch and other distros that ship webkit2gtk-4.1):** add `-tags webkit2_41`. Wails 2.12 defaults to the older 4.0 ABI.
+
+```bash
+wails dev   -tags webkit2_41
+wails build -tags webkit2_41 -platform linux/amd64
+```
+
+Single-target build for other OSes:
+```bash
+wails build -platform darwin/universal
+wails build -platform windows/amd64
+```
+

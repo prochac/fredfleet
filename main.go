@@ -7,6 +7,7 @@ import (
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/linux"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
 )
@@ -15,7 +16,7 @@ import (
 var assets embed.FS
 
 func main() {
-	app, err := NewApp()
+	app, err := NewApp(appIcon)
 	if err != nil {
 		log.Fatalf("init app: %v", err)
 	}
@@ -30,6 +31,9 @@ func main() {
 		OnStartup: app.startup,
 		Bind: []any{
 			app,
+		},
+		Linux: &linux.Options{
+			ProgramName: "fredfleet",
 		},
 		Mac: &mac.Options{
 			Appearance: mac.NSAppearanceNameAqua,

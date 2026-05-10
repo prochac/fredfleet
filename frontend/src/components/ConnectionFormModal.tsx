@@ -1,6 +1,7 @@
 import {useState} from 'react';
 import {connections} from '../../wailsjs/go/models';
 import {SaveConnection, TestConnection} from '../../wailsjs/go/main/App';
+import {toastError} from '../toast';
 
 type Mode = 'add' | 'edit';
 
@@ -100,7 +101,8 @@ export function ConnectionFormModal({mode, initial, existingNames, onSaved, onCa
             await TestConnection(buildConnection(), secret, s3Secret);
             setStatus({kind: 'ok', message: 'Connection succeeded.'});
         } catch (e) {
-            setStatus({kind: 'error', message: errorMessage(e)});
+            setStatus({kind: 'idle'});
+            toastError(e, 'Connection test failed');
         }
     }
 
@@ -115,7 +117,8 @@ export function ConnectionFormModal({mode, initial, existingNames, onSaved, onCa
             await SaveConnection(buildConnection(), secret, s3Secret);
             onSaved();
         } catch (e) {
-            setStatus({kind: 'error', message: errorMessage(e)});
+            setStatus({kind: 'idle'});
+            toastError(e, 'Failed to save connection');
         }
     }
 
@@ -280,8 +283,3 @@ export function ConnectionFormModal({mode, initial, existingNames, onSaved, onCa
     );
 }
 
-function errorMessage(e: unknown): string {
-    if (typeof e === 'string') return e;
-    if (e instanceof Error) return e.message;
-    return String(e);
-}

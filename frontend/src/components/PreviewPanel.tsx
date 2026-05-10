@@ -8,6 +8,7 @@ import {
 } from '@tanstack/react-table';
 import {CancelPreview, PreviewTable} from '../../wailsjs/go/main/App';
 import {catalog} from '../../wailsjs/go/models';
+import {errorMessage, toastError} from '../toast';
 import {Pending} from './Pending';
 
 type Props = {
@@ -144,7 +145,11 @@ export function PreviewPanel({connName, namespace, name}: Props) {
             .catch((e) => {
                 if (cancelled || inFlightReqIDRef.current !== reqID) return;
                 inFlightReqIDRef.current = null;
-                setError(errorMessage(e));
+                if (tableChanged) {
+                    setError(errorMessage(e));
+                } else {
+                    toastError(e, 'Failed to refresh preview');
+                }
                 setLoading(false);
             });
         return () => {
@@ -244,7 +249,7 @@ export function PreviewPanel({connName, namespace, name}: Props) {
         } catch (e) {
             if (inFlightReqIDRef.current !== reqID) return;
             inFlightReqIDRef.current = null;
-            setError(errorMessage(e));
+            toastError(e, 'Failed to load more rows');
         } finally {
             setLoadingMore(false);
         }
@@ -392,7 +397,7 @@ export function PreviewPanel({connName, namespace, name}: Props) {
                     )}
                 </div>
             )}
-            {(loading || error || activeCount > 0) && (
+            {(loading || activeCount > 0) && (
                 <div className="preview-status">
                     {activeCount > 0 && (
                         <span>
@@ -400,7 +405,6 @@ export function PreviewPanel({connName, namespace, name}: Props) {
                         </span>
                     )}
                     {loading && <span className="muted">Loading…</span>}
-                    {error && <span className="error-inline" role="alert">{error}</span>}
                 </div>
             )}
             <div className="preview-table-wrap">
@@ -459,8 +463,3 @@ function renderCell(value: unknown) {
     return String(value);
 }
 
-function errorMessage(e: unknown): string {
-    if (typeof e === 'string') return e;
-    if (e instanceof Error) return e.message;
-    return String(e);
-}
