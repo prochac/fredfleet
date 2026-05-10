@@ -70,3 +70,23 @@ type TableMetadataDTO struct {
 	PartitionSpec     PartitionSpecDTO `json:"partitionSpec"`
 	Properties        []PropertyDTO    `json:"properties"`
 }
+
+// PreviewColumnDTO describes one column of a row-preview response. Kind reuses
+// the FieldKind* constants so the frontend can decide whether to render a cell
+// as a leaf value or recurse into a nested structure.
+type PreviewColumnDTO struct {
+	Name     string `json:"name"`
+	TypeText string `json:"typeText"`
+	Kind     string `json:"kind"`
+}
+
+// PreviewRowsDTO is the row-preview payload. Rows are JSON-friendly: decimals
+// arrive as strings, timestamps as ISO-8601 strings, dates as YYYY-MM-DD,
+// bytes as base64. Null cells round-trip as JSON null. HasMore stays false
+// until M3e wires up Load-more pagination.
+type PreviewRowsDTO struct {
+	Columns  []PreviewColumnDTO `json:"columns"`
+	Rows     []map[string]any   `json:"rows"`
+	RowCount int                `json:"rowCount"`
+	HasMore  bool               `json:"hasMore"`
+}

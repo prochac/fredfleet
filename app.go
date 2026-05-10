@@ -14,9 +14,10 @@ import (
 )
 
 const (
-	probeTimeout = 10 * time.Second
-	listTimeout  = 10 * time.Second
-	loadTimeout  = 30 * time.Second
+	probeTimeout   = 10 * time.Second
+	listTimeout    = 10 * time.Second
+	loadTimeout    = 30 * time.Second
+	previewTimeout = 60 * time.Second
 )
 
 type App struct {
@@ -165,6 +166,30 @@ func (a *App) LoadTable(connName string, namespace []string, name string) (*cata
 	}
 	dto := catalog.BuildTableMetadataDTO(namespace, name, tbl)
 	return &dto, nil
+}
+
+// PreviewTable scans the table and returns up to limit rows as JSON-friendly
+// values. M3a baseline: no filter, no skip, no cancellation. limit ≤ 0
+// defaults to 100 rows.
+func (a *App) PreviewTable(connName string, namespace []string, name string, limit int) (*catalog.PreviewRowsDTO, error) {
+	cat, err := a.getCatalog(connName)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, previewTimeout)
+	defer cancel()
+	ident := append(table.Identifier(append([]string(nil), namespace...)), name)
+	tbl, err := cat.LoadTable(ctx, ident)
+	if err != nil {
+		wruntime.LogError(a.ctx, "preview table: "+err.Error())
+		return nil, errors.New(catalog.MapError(err))
+	}
+	dto, err := catalog.BuildPreviewRows(ctx, tbl, limit)
+	if err != nil {
+		wruntime.LogError(a.ctx, "preview rows: "+err.Error())
+		return nil, errors.New(catalog.MapError(err))
+	}
+	return dto, nil
 }
 
 // resolveSecret looks up a saved connection by name and pulls its secret from
