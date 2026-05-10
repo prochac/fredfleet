@@ -5,6 +5,7 @@ import {Pending} from './Pending';
 import {SchemaPanel} from './SchemaPanel';
 import {PartitionPanel} from './PartitionPanel';
 import {PropertiesPanel} from './PropertiesPanel';
+import {PreviewPanel} from './PreviewPanel';
 
 type Props = {
     connName: string;
@@ -57,6 +58,10 @@ export function TableMetadataPanel({connName, namespace, name}: Props) {
                         <section className="metadata-section">
                             <h2>Table properties</h2>
                             <PropertiesPanel table={data} />
+                        </section>
+                        <section className="metadata-section">
+                            <h2>Preview</h2>
+                            <PreviewPanel connName={connName} namespace={namespace} name={name} />
                         </section>
                     </>
                 )}

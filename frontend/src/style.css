@@ -383,3 +383,41 @@ tr:hover td { background: var(--row-hover); }
     justify-content: flex-end;
     margin-top: 16px;
 }
+
+.preview-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+.preview-table thead {
+    position: sticky;
+    top: 0;
+    background: var(--bg-elevated);
+    z-index: 1;
+}
+.preview-table th {
+    text-align: left;
+    color: var(--fg-muted);
+    font-weight: 500;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+.preview-table td {
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    vertical-align: top;
+    white-space: pre;
+}
+.preview-table .null {
+    color: var(--fg-muted);
+    font-style: italic;
+}
+.preview-table tbody tr:hover td {
+    background: var(--row-hover);
+}
