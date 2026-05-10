@@ -34,35 +34,28 @@ export function ConnectionList({items, onAdd, onEdit, onDelete}: Props) {
             {items.length === 0 ? (
                 <p className="empty">No connections yet. Add one to get started.</p>
             ) : (
-                <table>
-                    <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Auth</th>
-                        <th>URL</th>
-                        <th>Status</th>
-                        <th></th>
-                    </tr>
-                    </thead>
-                    <tbody>
+                <ul className="connection-cards">
                     {items.map((c) => {
                         const status = statuses[c.name];
                         return (
-                            <tr key={c.name}>
-                                <td>{c.name}</td>
-                                <td>{authLabel(c.auth?.kind)}</td>
-                                <td className="mono">{c.url}</td>
-                                <td>{renderStatus(status)}</td>
-                                <td className="actions">
+                            <li key={c.name} className="connection-card">
+                                <div className="connection-card-info">
+                                    <div className="connection-card-title">
+                                        <span className="connection-card-name" title={c.name}>{c.name}</span>
+                                        <span className="connection-card-auth">{authLabel(c.auth?.kind)}</span>
+                                        {renderStatus(status)}
+                                    </div>
+                                    <div className="connection-card-url mono" title={c.url}>{c.url}</div>
+                                </div>
+                                <div className="connection-card-actions">
                                     <button type="button" onClick={() => handleTest(c)}>Test</button>
                                     <button type="button" onClick={() => onEdit(c)}>Edit</button>
                                     <button type="button" className="danger" onClick={() => onDelete(c)}>Delete</button>
-                                </td>
-                            </tr>
+                                </div>
+                            </li>
                         );
                     })}
-                    </tbody>
-                </table>
+                </ul>
             )}
         </section>
     );

@@ -266,6 +266,67 @@ body {
 .manage-modal { width: 720px; max-width: calc(100vw - 32px); }
 .manage-modal .connection-list { padding: 0; }
 
+.connection-cards {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.connection-card {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-elevated);
+}
+.connection-card-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.connection-card-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.connection-card-name {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--fg);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+}
+.connection-card-auth {
+    font-size: 11px;
+    padding: 1px 8px;
+    border-radius: 99px;
+    border: 1px solid var(--border);
+    color: var(--fg-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.connection-card-url {
+    color: var(--fg-muted);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.connection-card-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
 h1 { font-size: 20px; font-weight: 600; margin: 0; }
 h2 { font-size: 16px; font-weight: 600; margin: 0 0 12px; }
 
@@ -293,6 +354,24 @@ input, select {
     width: 100%;
 }
 input:disabled, select:disabled { background: var(--bg-elevated); color: var(--fg-muted); }
+
+/* WebKitGTK ignores `background` on native <select>; strip the native chrome
+   and draw our own caret so dark mode actually applies. */
+select {
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    padding-right: 28px;
+    background-image: linear-gradient(45deg, transparent 50%, var(--fg-muted) 50%),
+                      linear-gradient(135deg, var(--fg-muted) 50%, transparent 50%);
+    background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+}
+select option {
+    background: var(--bg);
+    color: var(--fg);
+}
 
 label {
     display: flex;
