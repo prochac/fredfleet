@@ -90,3 +90,14 @@ type PreviewRowsDTO struct {
 	RowCount int                `json:"rowCount"`
 	HasMore  bool               `json:"hasMore"`
 }
+
+// PreviewFilterDTO is one row of the filter row above the preview table. Field
+// is the top-level Iceberg column name. Op is one of:
+// "eq", "neq", "lt", "lte", "gt", "gte", "isnull", "notnull", "starts".
+// Value is the raw JSON value from the input (typically a string for typed
+// inputs); ignored for "isnull"/"notnull".
+type PreviewFilterDTO struct {
+	Field string `json:"field"`
+	Op    string `json:"op"`
+	Value any    `json:"value,omitempty"`
+}

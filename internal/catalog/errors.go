@@ -15,6 +15,9 @@ func MapError(err error) string {
 	if err == nil {
 		return ""
 	}
+	if errors.Is(err, ErrFilter) {
+		return err.Error()
+	}
 	switch {
 	case errors.Is(err, rest.ErrUnauthorized),
 		errors.Is(err, rest.ErrAuthorizationExpired),

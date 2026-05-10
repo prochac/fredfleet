@@ -16,13 +16,31 @@ const defaultPreviewLimit = 100
 
 // BuildPreviewRows scans t and returns the first `limit` rows in
 // JSON-friendly form. It uses ToArrowRecords (streaming) so memory stays
-// bounded by batch size, not by full table size.
-func BuildPreviewRows(ctx context.Context, t *table.Table, limit int) (*PreviewRowsDTO, error) {
+// bounded by batch size, not by full table size. filters are AND-combined
+// and pushed down server-side; an empty list short-circuits to AlwaysTrue
+// inside table.WithRowFilter.
+func BuildPreviewRows(ctx context.Context, t *table.Table, limit int, filters []PreviewFilterDTO) (dto *PreviewRowsDTO, err error) {
+	// iceberg-go's scanner contains paths that panic on edge cases
+	// (e.g. visitors.go:183, evaluators.go:1035). In a Wails/WebKit
+	// process those panics escalate to fatal signals because WebKit
+	// installs SIGSEGV handlers without SA_ONSTACK. Convert any Go panic
+	// to an ErrFilter-wrapped error so the UI can surface it.
+	defer func() {
+		if r := recover(); r != nil {
+			dto = nil
+			err = fmt.Errorf("%w: scan panic: %v", ErrFilter, r)
+		}
+	}()
 	if limit <= 0 {
 		limit = defaultPreviewLimit
 	}
 
-	scan := t.Scan(table.WithLimit(int64(limit)))
+	expr, err := BuildRowFilter(t.Schema(), filters)
+	if err != nil {
+		return nil, err
+	}
+
+	scan := t.Scan(table.WithLimit(int64(limit)), table.WithRowFilter(expr))
 	arrowSchema, itr, err := scan.ToArrowRecords(ctx)
 	if err != nil {
 		return nil, err

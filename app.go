@@ -182,8 +182,10 @@ func (a *App) LoadTable(connName string, namespace []string, name string) (*cata
 
 // PreviewTable scans the table and returns up to limit rows as JSON-friendly
 // values. limit ≤ 0 defaults to 100 rows. reqID lets the frontend cancel an
-// in-flight scan via CancelPreview on unmount; pass "" to opt out.
-func (a *App) PreviewTable(reqID, connName string, namespace []string, name string, limit int) (*catalog.PreviewRowsDTO, error) {
+// in-flight scan via CancelPreview on unmount; pass "" to opt out. filters are
+// AND-combined and pushed down to the iceberg-go scan; an empty list returns
+// the unfiltered preview.
+func (a *App) PreviewTable(reqID, connName string, namespace []string, name string, limit int, filters []catalog.PreviewFilterDTO) (*catalog.PreviewRowsDTO, error) {
 	var dto *catalog.PreviewRowsDTO
 	err := a.withCatalog(connName, "preview table", func(cat *rest.Catalog) error {
 		reqCtx, release := a.requests.Register(a.ctx, reqID)
@@ -195,7 +197,7 @@ func (a *App) PreviewTable(reqID, connName string, namespace []string, name stri
 		if err != nil {
 			return err
 		}
-		dto, err = catalog.BuildPreviewRows(ctx, tbl, limit)
+		dto, err = catalog.BuildPreviewRows(ctx, tbl, limit, filters)
 		return err
 	})
 	return dto, err

@@ -163,24 +163,34 @@ body {
     font-size: 14px;
 }
 
-.metadata-panel { max-width: 960px; }
+.metadata-panel { display: flex; flex-direction: column; min-height: 100%; }
 .metadata-header { margin-bottom: 16px; }
 .metadata-header h1 { font-size: 18px; word-break: break-all; }
 
-.metadata-section {
-    margin-bottom: 24px;
-    padding: 16px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--bg);
+.metadata-narrow { max-width: 960px; }
+
+.tab-bar {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
 }
-.metadata-section h2 {
-    margin-top: 0;
-    margin-bottom: 12px;
-    font-size: 14px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+.tab-bar button {
+    background: none;
+    border: none;
+    padding: 8px 16px;
     color: var(--fg-muted);
+    font-size: 13px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+}
+.tab-bar button:hover {
+    color: var(--fg);
+}
+.tab-bar button[aria-selected="true"] {
+    color: var(--fg);
+    border-bottom-color: var(--accent, #4a9eff);
 }
 
 .schema-tree { font-size: 13px; }
@@ -511,4 +521,96 @@ tr:hover td { background: var(--row-hover); }
 }
 .preview-table tbody tr:hover td {
     background: var(--row-hover);
+}
+
+.preview-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.filter-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+}
+.filter-bar-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+.filter-bar-row select {
+    font-size: 13px;
+    padding: 4px 8px;
+}
+.filter-bar-row select.field {
+    flex: 0 0 220px;
+}
+.filter-bar-row select.op {
+    flex: 0 0 130px;
+}
+.filter-bar-row input.value {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 13px;
+    padding: 4px 8px;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+.filter-bar-row .value-placeholder {
+    flex: 1 1 auto;
+}
+.filter-bar-row button.remove {
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    font-size: 16px;
+    line-height: 1;
+}
+.filter-bar-actions {
+    display: flex;
+    gap: 8px;
+}
+.filter-bar-actions button {
+    font-size: 13px;
+    padding: 4px 12px;
+}
+.preview-status {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    font-size: 12px;
+    color: var(--fg-muted);
+}
+.preview-status .muted {
+    color: var(--fg-muted);
+    font-style: italic;
+}
+.preview-status .error-inline {
+    color: var(--error, #c33);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+.preview-table-wrap {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: auto;
+    background: var(--bg);
+}
+.preview-empty {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 16px;
+    color: var(--fg-muted);
+    font-size: 13px;
+}
+.preview-empty p {
+    margin: 0;
+}
+.preview-empty button {
+    font-size: 12px;
+    padding: 2px 8px;
 }

@@ -13,11 +13,21 @@ type Props = {
     name: string;
 };
 
+type Tab = 'preview' | 'schema' | 'partition' | 'properties';
+
+const TABS: {id: Tab; label: string}[] = [
+    {id: 'preview', label: 'Preview'},
+    {id: 'schema', label: 'Schema'},
+    {id: 'partition', label: 'Partition spec'},
+    {id: 'properties', label: 'Properties'},
+];
+
 export function TableMetadataPanel({connName, namespace, name}: Props) {
     const [data, setData] = useState<catalog.TableMetadataDTO | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [reloadKey, setReloadKey] = useState(0);
+    const [tab, setTab] = useState<Tab>('preview');
 
     useEffect(() => {
         let cancelled = false;
@@ -47,22 +57,31 @@ export function TableMetadataPanel({connName, namespace, name}: Props) {
             <Pending loading={loading} error={error} onRetry={() => setReloadKey((k) => k + 1)}>
                 {data && (
                     <>
-                        <section className="metadata-section">
-                            <h2>Schema</h2>
-                            <SchemaPanel schema={data.schema} />
-                        </section>
-                        <section className="metadata-section">
-                            <h2>Partition spec</h2>
-                            <PartitionPanel spec={data.partitionSpec} />
-                        </section>
-                        <section className="metadata-section">
-                            <h2>Table properties</h2>
-                            <PropertiesPanel table={data} />
-                        </section>
-                        <section className="metadata-section">
-                            <h2>Preview</h2>
+                        <div className="tab-bar" role="tablist">
+                            {TABS.map((t) => (
+                                <button
+                                    key={t.id}
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={tab === t.id}
+                                    onClick={() => setTab(t.id)}
+                                >
+                                    {t.label}
+                                </button>
+                            ))}
+                        </div>
+                        <div role="tabpanel" hidden={tab !== 'preview'}>
                             <PreviewPanel connName={connName} namespace={namespace} name={name} />
-                        </section>
+                        </div>
+                        <div className="metadata-narrow" role="tabpanel" hidden={tab !== 'schema'}>
+                            <SchemaPanel schema={data.schema} />
+                        </div>
+                        <div className="metadata-narrow" role="tabpanel" hidden={tab !== 'partition'}>
+                            <PartitionPanel spec={data.partitionSpec} />
+                        </div>
+                        <div className="metadata-narrow" role="tabpanel" hidden={tab !== 'properties'}>
+                            <PropertiesPanel table={data} />
+                        </div>
                     </>
                 )}
             </Pending>
