@@ -196,17 +196,17 @@ The first keyboard pass covered the bare minimum (tree arrow keys, tablist arrow
 
 Candidate shortcuts (pick the right subset; not all need to ship):
 
-| Shortcut | Action |
-|---|---|
-| `Mod+K` | Command palette / quick switch (open connection / jump to table by fuzzy name) |
-| `Mod+1`…`Mod+4` | Jump to Preview / Schema / Partition / Properties tab |
-| `Mod+R` | Refresh current scope (re-fetch namespace children, re-run preview scan) |
-| `Mod+F` | Focus the preview filter bar |
-| `Mod+,` | Open connection manager ("Manage…") |
-| `Mod+N` | New connection |
-| `Mod+W` / `Mod+Q` | Close window / quit (defer to Wails defaults when they exist) |
-| `Slash` (`/`) | Focus connection picker or quick-search (Gmail/GitHub-style) |
-| `g` then `t` | Vim-style: go to tables (focus tree). Two-key sequences need a small dispatcher. |
+| Shortcut          | Action                                                                           |
+|-------------------|----------------------------------------------------------------------------------|
+| `Mod+K`           | Command palette / quick switch (open connection / jump to table by fuzzy name)   |
+| `Mod+1`…`Mod+4`   | Jump to Preview / Schema / Partition / Properties tab                            |
+| `Mod+R`           | Refresh current scope (re-fetch namespace children, re-run preview scan)         |
+| `Mod+F`           | Focus the preview filter bar                                                     |
+| `Mod+,`           | Open connection manager ("Manage…")                                              |
+| `Mod+N`           | New connection                                                                   |
+| `Mod+W` / `Mod+Q` | Close window / quit (defer to Wails defaults when they exist)                    |
+| `Slash` (`/`)     | Focus connection picker or quick-search (Gmail/GitHub-style)                     |
+| `g` then `t`      | Vim-style: go to tables (focus tree). Two-key sequences need a small dispatcher. |
 
 Implementation notes for next session:
 
