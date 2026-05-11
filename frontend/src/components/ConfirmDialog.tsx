@@ -1,3 +1,5 @@
+import {Modal} from './Modal';
+
 type Props = {
     title: string;
     message: string;
@@ -8,15 +10,20 @@ type Props = {
 
 export function ConfirmDialog({title, message, confirmLabel = 'Confirm', onConfirm, onCancel}: Props) {
     return (
-        <div className="modal-backdrop" onClick={onCancel}>
-            <div className="modal" onClick={(e) => e.stopPropagation()}>
-                <h2>{title}</h2>
-                <p>{message}</p>
-                <div className="modal-actions">
-                    <button type="button" onClick={onCancel}>Cancel</button>
-                    <button type="button" className="danger" onClick={onConfirm}>{confirmLabel}</button>
-                </div>
+        <Modal
+            onCancel={onCancel}
+            labelledBy="confirm-dialog-title"
+            initialFocus="button:not(.danger)"
+        >
+            <h2 id="confirm-dialog-title">{title}</h2>
+            <p>{message}</p>
+            <div className="modal-actions">
+                <span className="modal-kbd-hint">
+                    <kbd>Esc</kbd> to cancel
+                </span>
+                <button type="button" onClick={onCancel}>Cancel</button>
+                <button type="button" className="danger" onClick={onConfirm}>{confirmLabel}</button>
             </div>
-        </div>
+        </Modal>
     );
 }

@@ -2,6 +2,7 @@ import {useState} from 'react';
 import {connections} from '../../wailsjs/go/models';
 import {SaveConnection, TestConnection} from '../../wailsjs/go/main/App';
 import {toastError} from '../toast';
+import {Modal} from './Modal';
 
 type Mode = 'add' | 'edit';
 
@@ -126,9 +127,12 @@ export function ConnectionFormModal({mode, initial, existingNames, onSaved, onCa
     const secretLabel = authKind === AUTH_OAUTH2 ? 'Client secret' : 'Bearer token';
 
     return (
-        <div className="modal-backdrop" onClick={onCancel}>
-            <div className="modal" onClick={(e) => e.stopPropagation()}>
-                <h2>{isEdit ? 'Edit connection' : 'Add connection'}</h2>
+        <Modal
+            onCancel={onCancel}
+            labelledBy="conn-form-title"
+            initialFocus={isEdit ? 'input[type="url"]' : 'input[type="text"]'}
+        >
+            <h2 id="conn-form-title">{isEdit ? 'Edit connection' : 'Add connection'}</h2>
                 <form
                     onSubmit={(e) => {
                         e.preventDefault();
@@ -142,7 +146,6 @@ export function ConnectionFormModal({mode, initial, existingNames, onSaved, onCa
                             value={name}
                             onChange={(e) => setName(e.target.value)}
                             disabled={isEdit}
-                            autoFocus={!isEdit}
                             required
                         />
                     </label>
@@ -273,13 +276,15 @@ export function ConnectionFormModal({mode, initial, existingNames, onSaved, onCa
                     {status.kind === 'saving' && <p className="status">Saving…</p>}
 
                     <div className="modal-actions">
+                        <span className="modal-kbd-hint">
+                            <kbd>Esc</kbd> to cancel
+                        </span>
                         <button type="button" onClick={onCancel} disabled={busy}>Cancel</button>
                         <button type="button" onClick={handleTest} disabled={busy}>Test</button>
                         <button type="submit" className="primary" disabled={busy}>Save</button>
                     </div>
                 </form>
-            </div>
-        </div>
+        </Modal>
     );
 }
 

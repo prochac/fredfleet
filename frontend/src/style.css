@@ -15,6 +15,7 @@
     --ok-fg: #1e8e3e;
     --row-hover: #f0f0f3;
     --modal-backdrop: rgba(0, 0, 0, 0.4);
+    --focus-ring: #0071e3;
 }
 
 [data-theme="dark"] {
@@ -34,6 +35,7 @@
     --ok-fg: #66d97f;
     --row-hover: #28282a;
     --modal-backdrop: rgba(0, 0, 0, 0.6);
+    --focus-ring: #4ea8ff;
 }
 
 * { box-sizing: border-box; }
@@ -667,3 +669,111 @@ tr:hover td { background: var(--row-hover); }
     font-size: 12px;
     padding: 2px 8px;
 }
+
+/* --- Keyboard navigation: focus rings, help, hints --- */
+
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+.tree-row:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
+}
+
+.tab-bar button:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
+    border-radius: 4px;
+}
+
+[role="dialog"]:focus {
+    outline: none;
+}
+
+.sidebar-help-button {
+    width: 28px;
+    flex-shrink: 0;
+    padding: 6px 0;
+    font-weight: 600;
+    text-align: center;
+}
+
+.sidebar-footer {
+    padding: 8px 12px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--fg-muted);
+    line-height: 1.5;
+}
+.sidebar-footer .kbd-inline {
+    display: block;
+    word-spacing: 2px;
+}
+
+kbd {
+    display: inline-block;
+    padding: 1px 5px;
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 10.5px;
+    line-height: 1.2;
+    min-width: 14px;
+    text-align: center;
+}
+
+.modal-kbd-hint {
+    color: var(--fg-muted);
+    font-size: 11px;
+    margin-right: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.kbd-section {
+    margin-bottom: 16px;
+}
+.kbd-section h3 {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--fg-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin: 0 0 6px;
+}
+.kbd-list {
+    margin: 0;
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 4px 16px;
+    align-items: baseline;
+}
+.kbd-row {
+    display: contents;
+}
+.kbd-list dt {
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+    white-space: nowrap;
+}
+.kbd-list dd {
+    margin: 0;
+    color: var(--fg);
+    font-size: 13px;
+}
+.kbd-or {
+    color: var(--fg-muted);
+    font-size: 11px;
+}
+

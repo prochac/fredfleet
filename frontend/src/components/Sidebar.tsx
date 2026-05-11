@@ -7,6 +7,7 @@ type Props = {
     selected: string | null;
     onSelect: (name: string | null) => void;
     onManage: () => void;
+    onOpenHelp: () => void;
     selectedTable: {namespace: TreePath; name: string} | null;
     onSelectTable: (t: {namespace: TreePath; name: string}) => void;
 };
@@ -16,6 +17,7 @@ export function Sidebar({
     selected,
     onSelect,
     onManage,
+    onOpenHelp,
     selectedTable,
     onSelectTable,
 }: Props) {
@@ -37,12 +39,26 @@ export function Sidebar({
                 <button type="button" onClick={onManage}>
                     Manage…
                 </button>
+                <button
+                    type="button"
+                    className="sidebar-help-button"
+                    onClick={onOpenHelp}
+                    aria-label="Keyboard shortcuts"
+                    title="Keyboard shortcuts (press ?)"
+                >
+                    ?
+                </button>
             </div>
             <NamespaceTree
                 connName={selected}
                 selectedTable={selectedTable}
                 onSelectTable={onSelectTable}
             />
+            <footer className="sidebar-footer">
+                <span className="kbd-inline">
+                    <kbd>↑</kbd><kbd>↓</kbd> navigate · <kbd>→</kbd> expand · <kbd>Enter</kbd> open · <kbd>?</kbd> help
+                </span>
+            </footer>
         </aside>
     );
 }

@@ -6,6 +6,8 @@ import {WindowSetTitle} from '../wailsjs/runtime/runtime';
 import {ConnectionList} from './components/ConnectionList';
 import {ConnectionFormModal} from './components/ConnectionFormModal';
 import {ConfirmDialog} from './components/ConfirmDialog';
+import {KeyboardHelpModal} from './components/KeyboardHelpModal';
+import {Modal} from './components/Modal';
 import {Sidebar} from './components/Sidebar';
 import {TableMetadataPanel} from './components/TableMetadataPanel';
 import type {TreePath} from './state/treeStore';
@@ -17,7 +19,8 @@ type ModalState =
     | {kind: 'manage'}
     | {kind: 'add'}
     | {kind: 'edit'; connection: connections.Connection}
-    | {kind: 'delete'; connection: connections.Connection};
+    | {kind: 'delete'; connection: connections.Connection}
+    | {kind: 'help'};
 
 type SelectedTable = {namespace: TreePath; name: string} | null;
 
@@ -74,6 +77,23 @@ export default function App() {
         document.title = t;
     }, [selectedConnection]);
 
+    // Global ?-key shortcut to open the keyboard help. Ignored while typing
+    // into a form control so it doesn't fight the user.
+    useEffect(() => {
+        const handler = (e: KeyboardEvent) => {
+            if (e.key !== '?') return;
+            const t = e.target as HTMLElement | null;
+            const tag = t?.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t?.isContentEditable) {
+                return;
+            }
+            e.preventDefault();
+            setModal({kind: 'help'});
+        };
+        document.addEventListener('keydown', handler);
+        return () => document.removeEventListener('keydown', handler);
+    }, []);
+
     async function handleConfirmDelete(name: string) {
         try {
             await DeleteConnection(name);
@@ -101,6 +121,7 @@ export default function App() {
                 selected={selectedConnection}
                 onSelect={handleSelectConnection}
                 onManage={() => setModal({kind: 'manage'})}
+                onOpenHelp={() => setModal({kind: 'help'})}
                 selectedTable={selectedTable}
                 onSelectTable={setSelectedTable}
                 key={selectedConnection ?? '__none__'}
@@ -118,21 +139,29 @@ export default function App() {
             </main>
 
             {modal.kind === 'manage' && (
-                <div className="modal-backdrop" onClick={() => setModal({kind: 'none'})}>
-                    <div className="modal manage-modal" onClick={(e) => e.stopPropagation()}>
-                        <ConnectionList
-                            items={items}
-                            onAdd={() => setModal({kind: 'add'})}
-                            onEdit={(c) => setModal({kind: 'edit', connection: c})}
-                            onDelete={(c) => setModal({kind: 'delete', connection: c})}
-                        />
-                        <div className="modal-actions">
-                            <button type="button" onClick={() => setModal({kind: 'none'})}>
-                                Close
-                            </button>
-                        </div>
+                <Modal
+                    className="manage-modal"
+                    onCancel={() => setModal({kind: 'none'})}
+                >
+                    <ConnectionList
+                        items={items}
+                        onAdd={() => setModal({kind: 'add'})}
+                        onEdit={(c) => setModal({kind: 'edit', connection: c})}
+                        onDelete={(c) => setModal({kind: 'delete', connection: c})}
+                    />
+                    <div className="modal-actions">
+                        <span className="modal-kbd-hint">
+                            <kbd>Esc</kbd> to close
+                        </span>
+                        <button type="button" onClick={() => setModal({kind: 'none'})}>
+                            Close
+                        </button>
                     </div>
-                </div>
+                </Modal>
+            )}
+
+            {modal.kind === 'help' && (
+                <KeyboardHelpModal onClose={() => setModal({kind: 'none'})} />
             )}
 
             {modal.kind === 'add' && (

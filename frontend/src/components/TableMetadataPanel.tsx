@@ -1,4 +1,4 @@
-import {useEffect, useState} from 'react';
+import {KeyboardEvent, useEffect, useRef, useState} from 'react';
 import {LoadTable} from '../../wailsjs/go/main/App';
 import {catalog} from '../../wailsjs/go/models';
 import {Pending} from './Pending';
@@ -28,6 +28,34 @@ export function TableMetadataPanel({connName, namespace, name}: Props) {
     const [error, setError] = useState<string | null>(null);
     const [reloadKey, setReloadKey] = useState(0);
     const [tab, setTab] = useState<Tab>('preview');
+    const tabRefs = useRef<Map<Tab, HTMLButtonElement>>(new Map());
+
+    function handleTabKey(e: KeyboardEvent<HTMLDivElement>) {
+        const idx = TABS.findIndex((t) => t.id === tab);
+        if (idx < 0) return;
+        let next = idx;
+        switch (e.key) {
+            case 'ArrowLeft':
+                next = idx > 0 ? idx - 1 : TABS.length - 1;
+                break;
+            case 'ArrowRight':
+                next = idx < TABS.length - 1 ? idx + 1 : 0;
+                break;
+            case 'Home':
+                next = 0;
+                break;
+            case 'End':
+                next = TABS.length - 1;
+                break;
+            default:
+                return;
+        }
+        e.preventDefault();
+        const nextTab = TABS[next].id;
+        setTab(nextTab);
+        // Move DOM focus to keep keyboard interaction continuous.
+        queueMicrotask(() => tabRefs.current.get(nextTab)?.focus());
+    }
 
     useEffect(() => {
         let cancelled = false;
@@ -57,13 +85,23 @@ export function TableMetadataPanel({connName, namespace, name}: Props) {
             <Pending loading={loading} error={error} onRetry={() => setReloadKey((k) => k + 1)}>
                 {data && (
                     <>
-                        <div className="tab-bar" role="tablist">
+                        <div
+                            className="tab-bar"
+                            role="tablist"
+                            aria-label="Table sections"
+                            onKeyDown={handleTabKey}
+                        >
                             {TABS.map((t) => (
                                 <button
                                     key={t.id}
+                                    ref={(el) => {
+                                        if (el) tabRefs.current.set(t.id, el);
+                                        else tabRefs.current.delete(t.id);
+                                    }}
                                     type="button"
                                     role="tab"
                                     aria-selected={tab === t.id}
+                                    tabIndex={tab === t.id ? 0 : -1}
                                     onClick={() => setTab(t.id)}
                                 >
                                     {t.label}

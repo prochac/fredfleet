@@ -36,9 +36,10 @@ export type RootState = {
     error: string | null;
 };
 
-type State = {
+export type State = {
     root: RootState;
     byKey: Record<NodeKey, TreeNode>;
+    focusedKey: NodeKey | null;
 };
 
 type Action =
@@ -50,10 +51,11 @@ type Action =
     | {type: 'node_namespaces_loaded'; key: NodeKey; items: NodeKey[]; nodes: TreeNode[]}
     | {type: 'node_tables_loaded'; key: NodeKey; items: NodeKey[]; nodes: TreeNode[]}
     | {type: 'node_error'; key: NodeKey; error: string}
-    | {type: 'node_clear_children'; key: NodeKey};
+    | {type: 'node_clear_children'; key: NodeKey}
+    | {type: 'focus_set'; key: NodeKey | null};
 
 function initialState(): State {
-    return {root: {status: 'idle', items: [], error: null}, byKey: {}};
+    return {root: {status: 'idle', items: [], error: null}, byKey: {}, focusedKey: null};
 }
 
 function reducer(state: State, a: Action): State {
@@ -62,6 +64,7 @@ function reducer(state: State, a: Action): State {
             return {...state, root: {...state.root, status: 'loading', error: null}};
         case 'root_loaded':
             return {
+                ...state,
                 root: {status: 'loaded', items: a.items, error: null},
                 byKey: mergeNodes(state.byKey, a.nodes),
             };
@@ -147,7 +150,36 @@ function reducer(state: State, a: Action): State {
                 },
             };
         }
+        case 'focus_set':
+            return {...state, focusedKey: a.key};
     }
+}
+
+export function flattenVisible(state: State): NodeKey[] {
+    const out: NodeKey[] = [];
+    const walk = (keys: NodeKey[]) => {
+        for (const key of keys) {
+            const node = state.byKey[key];
+            if (!node) continue;
+            out.push(key);
+            if (node.kind === 'namespace' && node.expanded) {
+                walk(node.childNamespaces);
+                walk(node.childTables);
+            }
+        }
+    };
+    walk(state.root.items);
+    return out;
+}
+
+export function parentKey(state: State, key: NodeKey): NodeKey | null {
+    const node = state.byKey[key];
+    if (!node) return null;
+    const parentPath =
+        node.kind === 'namespace' ? node.path.slice(0, -1) : node.namespace;
+    if (parentPath.length === 0 && node.kind === 'namespace') return null;
+    const candidate = keyOfNamespace(parentPath);
+    return state.byKey[candidate] ? candidate : null;
 }
 
 function mergeNodes(byKey: Record<NodeKey, TreeNode>, nodes: TreeNode[]): Record<NodeKey, TreeNode> {
@@ -260,7 +292,11 @@ export function useTreeStore(connName: string | null) {
         [fetchChildren],
     );
 
-    return {state, expand, refreshRoot: fetchRoot, refreshNode};
+    const setFocus = useCallback((key: NodeKey | null) => {
+        dispatch({type: 'focus_set', key});
+    }, []);
+
+    return {state, expand, refreshRoot: fetchRoot, refreshNode, setFocus};
 }
 
 function errorMessage(e: unknown): string {
