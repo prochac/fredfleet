@@ -54,11 +54,15 @@ type Action =
     | {type: 'node_clear_children'; key: NodeKey}
     | {type: 'focus_set'; key: NodeKey | null};
 
-function initialState(): State {
+// initialState, reducer and newNamespaceNode are exported for treeStore.test.ts.
+// The invariants they carry — collapse/re-expand never re-fetches, and the two
+// child slots are independent — are the reason this store exists, and they are
+// far cheaper to pin here than through a mounted component.
+export function initialState(): State {
     return {root: {status: 'idle', items: [], error: null}, byKey: {}, focusedKey: null};
 }
 
-function reducer(state: State, a: Action): State {
+export function reducer(state: State, a: Action): State {
     switch (a.type) {
         case 'root_loading':
             return {...state, root: {...state.root, status: 'loading', error: null}};
@@ -193,7 +197,7 @@ function mergeNodes(byKey: Record<NodeKey, TreeNode>, nodes: TreeNode[]): Record
     return next;
 }
 
-function newNamespaceNode(path: TreePath): NamespaceNode {
+export function newNamespaceNode(path: TreePath): NamespaceNode {
     return {
         kind: 'namespace',
         path,
