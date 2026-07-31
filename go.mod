@@ -3,7 +3,7 @@ module github.com/prochac/fredfleet
 go 1.26
 
 require (
-	github.com/apache/arrow-go/v18 v18.7.0
+	github.com/apache/arrow-go/v18 v18.5.2-0.20260220015023-a886a5722b87
 	github.com/apache/iceberg-go v0.5.0
 	github.com/uptrace/bun/driver/sqliteshim v1.2.17
 	github.com/wailsapp/wails/v2 v2.13.0
@@ -125,8 +125,7 @@ require (
 	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/substrait-io/substrait v0.87.0 // indirect
 	github.com/substrait-io/substrait-go/v7 v7.4.0 // indirect
-	github.com/substrait-io/substrait-go/v8 v8.1.1 // indirect
-	github.com/substrait-io/substrait-protobuf/go v0.85.0 // indirect
+	github.com/substrait-io/substrait-protobuf/go v0.81.0 // indirect
 	github.com/tkrajina/go-reflector v0.5.8 // indirect
 	github.com/tmthrgd/go-hex v0.0.0-20190904060850-447a3041c3bc // indirect
 	github.com/twmb/murmur3 v1.1.8 // indirect
