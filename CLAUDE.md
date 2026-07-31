@@ -23,6 +23,9 @@ Early scaffolding. The plan lives in [`PLAN.md`](PLAN.md) — four sequential mi
 - **Arrow → JSON for row preview.** `iceberg-go` returns Arrow record batches. For v1, serialize to `[]map[string]any`. Coerce explicitly: decimals → string, timestamps → ISO-8601 string, bytes → base64. Don't rely on default `encoding/json` behavior for these.
 - **Null is not empty.** Null cells must render visually distinct from empty strings in the preview table.
 - **Lazy tree, no re-fetch.** The namespace tree loads children on expand and must not re-fetch already-loaded nodes when collapsed/re-expanded.
+- **`@types/node` must stay on v18.** TypeScript is pinned at 4.6, which cannot *parse* the `.d.ts` files shipped by recent `@types/node` (`ffi.d.ts` fails with TS1005/TS1139). Nothing imported it until `vitest` arrived and pulled it in transitively, at which point `npm run build` — i.e. `tsc && vite build`, i.e. every `wails build` — started failing. The devDependency is pinned to `^18.19.0` to hold it back. Unpin only together with a TypeScript upgrade.
+- **`go mod tidy` breaks this build — don't run it casually.** Tidying resolves `arrow-go` up to v18.7.0, which requires `substrait-protobuf/go` v0.85.0. But `iceberg-go` v0.5.0 pulls `substrait-go/v7` v7.4.0, which is only compatible with `substrait-protobuf` v0.81.0 — so MVS picks v0.85.0 and `substrait-go/v7` stops compiling (`undefined: extensions.SimpleExtensionURI`). The whole module fails to build, not just the tests. `arrow-go` must stay pinned at `v18.5.2-0.20260220015023-a886a5722b87` and `substrait-protobuf/go` at `v0.81.0` until `iceberg-go` ships a release that moves to `substrait-go/v8`. This is the concrete reason behind the "pin to tagged releases, don't bump" rule.
+- **Data race inside `iceberg-go`'s scan planner (v0.5.0).** `go test -race ./internal/catalog/` reports one race, entirely upstream: `Scan.collectManifestEntries` (`table/scanner.go:397`) hands the *same* cached partition evaluator to every errgroup worker, and `exprEvaluator.Eval` (`visitors.go:203`) writes `e.st = st` on that shared struct before visiting. Any table scanned with more than one manifest file trips it. For **unpartitioned** tables the expression is `AlwaysTrue` and the visitor never reads `st`, so it's benign — which is why it has not bitten us yet. For **partitioned** tables it is a correctness bug: concurrent workers can read another goroutine's partition record and prune the wrong data files. Not worked around in app code (we don't control the fan-out); revisit when upstream fixes it. Keep `-race` off the default test command or expect this one report.
 - **OAuth2 token refresh is on us, not iceberg-go.** `iceberg-go` v0.5.0's `Oauth2AuthManager` fetches a token once and caches it on the struct forever — `expires_in` is decoded but ignored, refresh tokens are never used, and there is no 401 re-auth path. After the access token expires, every cached `*rest.Catalog` keeps sending the stale bearer until the app restarts. Fixed upstream in `apache/iceberg-go@6842055` (PR #793, "feat(catalog): refresh oauth tokens") but **not** in any tagged release as of v0.5.0. We work around it reactively in `Registry.Do` (`internal/catalog/registry.go`): on `rest.ErrUnauthorized` / `rest.ErrAuthorizationExpired` we invalidate the cached catalog and retry once, which forces a fresh token fetch. We are intentionally **not** maintaining a fork of `iceberg-go` for this project (different org). Revisit when an upstream release ships the fix and the workaround can be removed.
 
 ## Layout
@@ -43,3 +46,14 @@ wails build -tags webkit2_41 -platform linux/amd64
 - `internal/connections/` — `Connection` type, JSON metadata store, OS keyring wrapper
 - `internal/catalog/` — `iceberg-go` REST probe + error→user-message mapping
 - `frontend/src/` — React/TS UI; `frontend/wailsjs/` is regenerated and gitignored
+
+## Tests
+
+```bash
+go test ./...          # backend; internal/catalog builds a real local Iceberg table as a fixture
+npm test --prefix frontend   # vitest
+```
+
+`internal/catalog/fixture_test.go` creates an unpartitioned Iceberg table under `t.TempDir()` via an in-memory `table.CatalogIO`, so the preview/filter/pagination tests run through the same `BuildPreviewRows` the app calls. It avoids iceberg-go's SQL catalog on purpose — that import pulls in `bun` + `modernc.org/sqlite` and forces a `go mod tidy` that breaks the build (see the substrait gotcha above).
+
+Skip `-race` on `./internal/catalog/` unless you want the known upstream iceberg-go report.

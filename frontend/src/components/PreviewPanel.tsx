@@ -9,6 +9,7 @@ import {
 import {CancelRequest, PreviewTable} from '../../wailsjs/go/main/App';
 import {catalog} from '../../wailsjs/go/models';
 import {useDebounced} from '../hooks/useDebounced';
+import {pageSizePlan} from '../state/pageSize';
 import {PRIORITY, useCommand, useRunCommand} from '../shortcuts/registry';
 import {errorMessage, toastError} from '../toast';
 import {Pending} from './Pending';
@@ -192,9 +193,10 @@ export function PreviewPanel({connName, namespace, name}: Props) {
     });
 
     function onPageSizeChange(newSize: number) {
-        if (newSize === pageSize) return;
         const buffered = dataRef.current?.rows.length ?? 0;
-        if (dataRef.current && newSize <= buffered) {
+        const plan = pageSizePlan(newSize, pageSize, buffered);
+        if (plan === null) return;
+        if (plan.kind === 'slice') {
             // Buffer already covers the new page size — re-paginate client-side.
             pageSizeRef.current = newSize;
             setPageSize(newSize);

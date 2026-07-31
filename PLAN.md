@@ -106,9 +106,16 @@ All five sub-milestones shipped in order, one commit each:
 - ✅ `go vet ./...`, `go test ./...`, and `tsc --noEmit` clean; `preview_test.go` + `filter_test.go` cover the coercions and the filter translation.
 - ✅ Preview renders decimals/timestamps/dates/bytes readably against the live Lakekeeper test catalog; nulls visually distinct.
 - ✅ Filters execute server-side against the live catalog — the `starts_with` failure and the "bad filter stranded the user with no way to edit it back" fix both came out of real runtime use, not review.
-- ⏳ The whole-table filter proof (match a value that only exists past row 100) wasn't run as an explicit check.
-- ⏳ The M3c goroutine-leak measurement (`runtime.NumGoroutine()` back to baseline within 5 s) wasn't run; cancellation is wired and observed to stop scans, but the count was never taken.
-- ⏳ Load-more duplicate check and the 100 → 500 / 500 → 100 page-size semantics implemented per spec, not re-verified live after `a1289ca`.
+- ✅ **M3d whole-table filter proof** — `TestFilterMatchesRowPastFirstPage`. A 300-row fixture carries `tag="needle"` on exactly one row, id=250; the test first asserts the needle is absent from an unfiltered 100-row page (so the premise holds), then that `tag = needle` at `limit=100` returns exactly `[250]`. `TestFilterOnUnmatchedValueReturnsNoRows` covers the inverse and checks the column list survives an empty result, which is what keeps the "Clear filters" recovery path renderable.
+- ✅ **M3c goroutine measurement** — `TestCancelledScanReleasesGoroutines`. Takes a baseline after a warmup scan, starts a scan against a deliberately slow IO wrapper, asserts the count actually rose (so a vacuous pass is impossible), cancels through `RequestRegistry`, and requires `context.Canceled` back in under 1 s and `runtime.NumGoroutine()` at or below baseline within 5 s. Passes; ~1.1 s.
+- ✅ **M3e Load-more has no duplicates** — `TestLoadMoreProducesNoDuplicates` walks the exact `skip = len(loaded)` sequence the frontend issues and asserts the pages tile 0..299 with no repeat and no gap. `TestPaginationUnderFilterHasNoDuplicates` repeats it under an active filter (every third row matches), which is the case the criterion actually names. `TestHasMoreAtExactPageBoundary` pins the trailing-probe-row rule: a 200-row table must not offer a Load-more that would return zero rows.
+- ✅ **M3e page-size semantics** (100 → 500 re-fetches at a 200-row buffer; 500 → 100 slices client-side) — the decision was extracted out of `PreviewPanel.onPageSizeChange` into a pure `pageSizePlan()` in `frontend/src/state/pageSize.ts`, and `pageSize.test.ts` asserts both named cases plus the boundary (`buffered === newSize` slices, one row short re-fetches), the no-op case, and the cold-buffer case. `vitest` added as the frontend test runner: `npm test` in `frontend/`.
+
+#### Validation fixtures
+
+`internal/catalog/fixture_test.go` builds a **real** Iceberg table on local disk and runs the assertions through `BuildPreviewRows`, the same function `App.PreviewTable` delegates to — so these are end-to-end proofs of the scan path, not mock-level ones.
+
+It deliberately does **not** use iceberg-go's SQL catalog. Importing `catalog/sql` drags in `bun` + `modernc.org/sqlite`, and the `go mod tidy` that follows bumps `arrow-go`, `wails` and `grpc` — which the dep-pinning rule forbids, and which in practice breaks the build (see the substrait note in `CLAUDE.md`). `table.CatalogIO` is a two-method interface, so the fixture implements an in-memory one and costs zero new dependencies.
 
 ### Scope decisions (locked in for M3)
 
@@ -281,6 +288,9 @@ The palette used to index only already-expanded namespaces, because the tree loa
 These were left ⏳ in their own milestones and are still open; M4 is the natural place to clear them.
 
 - ⏳ **M1** — dark mode toggles correctly when the OS preference changes (flip the system setting with the app open, preference left on "system"), and the Light/Dark pin survives a restart.
-- ⏳ **M3d** — whole-table filter proof: match a value that only exists past row 100.
-- ⏳ **M3c** — `runtime.NumGoroutine()` back to baseline within 5 s after cancelling a slow scan.
-- ⏳ **M3e** — no duplicate rows on Load more; 100 → 500 re-fetches with a 200-row buffer, 500 → 100 slices client-side.
+- ✅ **M3d** — whole-table filter proof. Covered by `TestFilterMatchesRowPastFirstPage`.
+- ✅ **M3c** — `runtime.NumGoroutine()` back to baseline within 5 s after cancelling a slow scan. Covered by `TestCancelledScanReleasesGoroutines`.
+- ✅ **M3e (backend half)** — no duplicate rows on Load more, plain and under an active filter. Covered by `TestLoadMoreProducesNoDuplicates`, `TestPaginationUnderFilterHasNoDuplicates`, `TestHasMoreAtExactPageBoundary`.
+- ✅ **M3e (frontend half)** — 100 → 500 re-fetches with a 200-row buffer, 500 → 100 slices client-side. Covered by `frontend/src/state/pageSize.test.ts`.
+
+**M3 validation debt is now clear.** Only the M1 dark-mode check remains, and it is inherently manual (flip the OS setting with the app open).
