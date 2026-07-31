@@ -1,4 +1,7 @@
 :root {
+    /* theme.ts overrides this on <html> to match the resolved theme; the
+       declaration here keeps a pre-script paint from flashing white. */
+    color-scheme: light dark;
     --bg: #ffffff;
     --bg-elevated: #f5f5f7;
     --fg: #1d1d1f;
@@ -696,7 +699,7 @@ a:focus-visible {
     outline: none;
 }
 
-.sidebar-help-button {
+.sidebar-icon-button {
     width: 28px;
     flex-shrink: 0;
     padding: 6px 0;

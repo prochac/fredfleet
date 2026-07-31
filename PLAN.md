@@ -43,7 +43,7 @@ Four sequential milestones. Each is a shippable checkpoint:
 - ✅ Can add a connection pointing at a real REST catalog — Lakekeeper + Keycloak, confirmed by every subsequent live check in M2/M3.
 - ✅ Connection persists after app restart (atomic write + read on launch).
 - ✅ Wrong URL or bad auth shows a clear error message — `MapError` covers auth, forbidden, timeouts, DNS, ECONNREFUSED.
-- ⏳ Dark mode toggles correctly when OS preference changes — implementation in `theme.ts` via `matchMedia` listener; needs visual confirmation by toggling the system setting with the app open.
+- ⏳ Dark mode toggles correctly when OS preference changes — `theme.ts` follows `matchMedia` under the default "system" preference; M4 added a System/Light/Dark override. Needs visual confirmation by toggling the system setting with the app open.
 
 ---
 
@@ -214,6 +214,7 @@ M3b ─┘
 - ✅ **Cross-platform keyboard shortcuts** — shipped, including a `Mod+K` command palette that searches the whole catalog. See the two follow-ups below.
 - ✅ **Error toasts** (`de81af1`) — `sonner` toasts for refetch/save/load-more failures; first load stays inline via `<Pending>` so a failed initial fetch doesn't leave an empty panel plus a toast.
 - ✅ **App icon + dynamic window title** (`de81af1`) — `WindowSetTitle` and `document.title` follow the active connection; `internal/desktopentry/` self-installs `~/.local/share/applications/fredfleet.desktop` on Linux first launch (idempotent, skipped in packaged contexts), fixing Wayland window-icon resolution via `StartupWMClass`.
+- ✅ **Theme control** — `theme.ts` became a store: preference `system | light | dark` persisted in localStorage, `system` (the default) tracks `prefers-color-scheme` live. Sidebar button + `Mod+Shift+D` cycle it, `color-scheme` on `<html>` pulls native scrollbars and `<select>` popups into the theme, and sonner reads the resolved value instead of re-sniffing the media query. `mac.NSAppearanceNameAqua` in `main.go` was pinning macOS to light — and with it the webview's `prefers-color-scheme` — so it's now `mac.DefaultAppearance`.
 - ⏳ **Build and package for macOS + Linux** — `.github/workflows/release.yml` builds linux/amd64, darwin/universal and windows/amd64 and drafts a release on a `v*` tag (`de81af1`). **Never executed — no tag has been cut**, so the macOS/Windows legs, artifact naming and the release step are all unverified.
 - ✅ **README quickstart** (`de81af1`) — install per platform, bearer and OAuth2 connection walkthroughs, storage locations, shortcut table, filter/pagination semantics, build-from-source.
 
@@ -279,7 +280,7 @@ The palette used to index only already-expanded namespaces, because the tree loa
 
 These were left ⏳ in their own milestones and are still open; M4 is the natural place to clear them.
 
-- ⏳ **M1** — dark mode toggles correctly when the OS preference changes (flip the system setting with the app open).
+- ⏳ **M1** — dark mode toggles correctly when the OS preference changes (flip the system setting with the app open, preference left on "system"), and the Light/Dark pin survives a restart.
 - ⏳ **M3d** — whole-table filter proof: match a value that only exists past row 100.
 - ⏳ **M3c** — `runtime.NumGoroutine()` back to baseline within 5 s after cancelling a slow scan.
 - ⏳ **M3e** — no duplicate rows on Load more; 100 → 500 re-fetches with a 200-row buffer, 500 → 100 slices client-side.

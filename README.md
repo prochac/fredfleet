@@ -77,7 +77,16 @@ Inspect on Linux: `secret-tool lookup service fredfleet account <connection-name
 
 ## Theme
 
-The app follows your OS dark/light preference automatically via `prefers-color-scheme`. No user setting.
+The app starts on **System**, following your OS dark/light preference and
+switching live when you change it. The button in the sidebar header (or
+`Mod+Shift+D`) cycles System → Light → Dark; a pinned choice ignores the OS and
+is remembered across restarts.
+
+Pinning is also the escape hatch when the OS preference can't be read: on Linux,
+WebKit derives `prefers-color-scheme` from GTK, so a desktop that sets its dark
+style without setting `gtk-application-prefer-dark-theme` (or a `*-dark` GTK
+theme) leaves the app light. Setting it in `~/.config/gtk-3.0/settings.ini` fixes
+detection for every GTK app; pinning fixes just this one.
 
 ## Keyboard shortcuts
 
@@ -90,6 +99,7 @@ the same list, rendered for the platform you're on.
 | `?` | Keyboard shortcuts |
 | `Mod+,` | Manage connections |
 | `Mod+N` | New connection |
+| `Mod+Shift+D` | Switch theme (system → light → dark) |
 | `Mod+0` | Focus the namespace tree |
 | `Mod+1` … `Mod+4` | Preview / Schema / Partition spec / Properties |
 | `Mod+L` | Focus the connection picker |

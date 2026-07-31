@@ -5,6 +5,27 @@ import {COMMANDS} from '../shortcuts/commands';
 import {formatShortcut} from '../shortcuts/keys';
 import {useCommand} from '../shortcuts/registry';
 import type {TreePath} from '../state/treeStore';
+import {
+    cycleThemePreference,
+    useTheme,
+    type ResolvedTheme,
+    type ThemePreference,
+} from '../theme';
+
+const THEME_GLYPH: Record<ThemePreference, string> = {
+    system: '◐',
+    light: '☀',
+    dark: '☾',
+};
+
+/**
+ * The button cycles rather than toggles, so the label has to say both what the
+ * current setting is and — for 'system' — what it currently resolves to.
+ */
+function themeLabel(preference: ThemePreference, resolved: ResolvedTheme): string {
+    if (preference === 'system') return `Theme: system (${resolved})`;
+    return `Theme: ${preference}`;
+}
 
 type Props = {
     connectionsList: connections.Connection[];
@@ -27,11 +48,13 @@ export function Sidebar({
 }: Props) {
     const pickerRef = useRef<HTMLSelectElement>(null);
     const paletteKeys = formatShortcut(COMMANDS.find((c) => c.id === 'palette.open')!.keys[0]);
+    const {preference, resolved} = useTheme();
 
     // Focus only. There is no portable way to pop a native <select> open —
     // showPicker() is Chromium-only, so WebKitGTK and WKWebView would ignore
     // it. The user arrows or types from here.
     useCommand('focus.connectionPicker', () => pickerRef.current?.focus());
+    useCommand('theme.cycle', cycleThemePreference);
 
     return (
         <aside className="sidebar">
@@ -54,7 +77,18 @@ export function Sidebar({
                 </button>
                 <button
                     type="button"
-                    className="sidebar-help-button"
+                    className="sidebar-icon-button"
+                    onClick={cycleThemePreference}
+                    aria-label={themeLabel(preference, resolved)}
+                    title={`${themeLabel(preference, resolved)} (${formatShortcut(
+                        COMMANDS.find((c) => c.id === 'theme.cycle')!.keys[0],
+                    ).join('+')})`}
+                >
+                    <span aria-hidden="true">{THEME_GLYPH[preference]}</span>
+                </button>
+                <button
+                    type="button"
+                    className="sidebar-icon-button"
                     onClick={onOpenHelp}
                     aria-label="Keyboard shortcuts"
                     title="Keyboard shortcuts (press ?)"

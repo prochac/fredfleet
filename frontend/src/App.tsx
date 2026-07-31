@@ -16,7 +16,7 @@ import type {OverlayState} from './shortcuts/useGlobalShortcuts';
 import {initPlatform} from './shortcuts/keys';
 import {TableIndexProvider} from './state/tableIndex';
 import type {TreePath} from './state/treeStore';
-import {initTheme} from './theme';
+import {initTheme, useTheme} from './theme';
 import {toastError} from './toast';
 
 type ModalState =
@@ -38,6 +38,9 @@ export default function App() {
     const [selectedTable, setSelectedTable] = useState<SelectedTable>(null);
     const [paletteOpen, setPaletteOpen] = useState(false);
     const mainRef = useRef<HTMLElement>(null);
+    // sonner's own "system" mode reads prefers-color-scheme, which ignores a
+    // pinned preference — hand it the resolved theme instead.
+    const {resolved: theme} = useTheme();
 
     // A modal always wins: the palette can't be opened over one (palette.open
     // is scoped out), and every palette action closes the palette before it
@@ -213,7 +216,7 @@ export default function App() {
                         />
                     )}
 
-                    <Toaster richColors position="bottom-right" theme="system" />
+                    <Toaster richColors position="bottom-right" theme={theme} />
                 </div>
             </TableIndexProvider>
         </ShortcutProvider>

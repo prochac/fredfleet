@@ -5,6 +5,7 @@ export type CommandId =
     | 'help.open'
     | 'connections.manage'
     | 'connections.new'
+    | 'theme.cycle'
     | 'focus.tree'
     | 'focus.connectionPicker'
     | 'focus.filter'
@@ -87,6 +88,12 @@ export const COMMANDS: CommandDef[] = [
         title: 'New connection',
         group: 'Global',
         keys: [{key: 'n', mod: true}],
+    },
+    {
+        id: 'theme.cycle',
+        title: 'Switch theme (system → light → dark)',
+        group: 'Global',
+        keys: [{key: 'd', mod: true, shift: true}],
     },
 
     // Digit chords match on `code` so they survive the Czech number row, and

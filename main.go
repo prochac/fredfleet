@@ -36,7 +36,10 @@ func main() {
 			ProgramName: "fredfleet",
 		},
 		Mac: &mac.Options{
-			Appearance: mac.NSAppearanceNameAqua,
+			// Empty = follow the system. Pinning Aqua here would keep the
+			// window chrome light on a dark Mac and, worse, make the webview
+			// report prefers-color-scheme: light regardless of the OS setting.
+			Appearance: mac.DefaultAppearance,
 		},
 		Windows: &windows.Options{
 			Theme: windows.SystemDefault,
