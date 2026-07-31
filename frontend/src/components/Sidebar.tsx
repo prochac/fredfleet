@@ -1,5 +1,9 @@
+import {useRef} from 'react';
 import {connections} from '../../wailsjs/go/models';
 import {NamespaceTree} from './NamespaceTree';
+import {COMMANDS} from '../shortcuts/commands';
+import {formatShortcut} from '../shortcuts/keys';
+import {useCommand} from '../shortcuts/registry';
 import type {TreePath} from '../state/treeStore';
 
 type Props = {
@@ -21,10 +25,19 @@ export function Sidebar({
     selectedTable,
     onSelectTable,
 }: Props) {
+    const pickerRef = useRef<HTMLSelectElement>(null);
+    const paletteKeys = formatShortcut(COMMANDS.find((c) => c.id === 'palette.open')!.keys[0]);
+
+    // Focus only. There is no portable way to pop a native <select> open —
+    // showPicker() is Chromium-only, so WebKitGTK and WKWebView would ignore
+    // it. The user arrows or types from here.
+    useCommand('focus.connectionPicker', () => pickerRef.current?.focus());
+
     return (
         <aside className="sidebar">
             <div className="sidebar-header">
                 <select
+                    ref={pickerRef}
                     className="connection-picker"
                     value={selected ?? ''}
                     onChange={(e) => onSelect(e.target.value || null)}
@@ -56,7 +69,9 @@ export function Sidebar({
             />
             <footer className="sidebar-footer">
                 <span className="kbd-inline">
-                    <kbd>↑</kbd><kbd>↓</kbd> navigate · <kbd>→</kbd> expand · <kbd>Enter</kbd> open · <kbd>?</kbd> help
+                    <kbd>↑</kbd><kbd>↓</kbd> navigate · <kbd>→</kbd> expand · {paletteKeys.map((k) => (
+                        <kbd key={k}>{k}</kbd>
+                    ))} jump · <kbd>?</kbd> help
                 </span>
             </footer>
         </aside>

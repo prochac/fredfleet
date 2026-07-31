@@ -6,7 +6,9 @@ import {
     TreePath,
     useTreeStore,
 } from '../state/treeStore';
-import type {NodeKey} from '../state/treeStore';
+import type {NodeKey, TableNode} from '../state/treeStore';
+import {usePublishTableIndex} from '../state/tableIndex';
+import {PRIORITY, useCommand} from '../shortcuts/registry';
 import {TreeNode} from './TreeNode';
 import {Pending} from './Pending';
 
@@ -116,6 +118,58 @@ export function NamespaceTree({connName, selectedTable, onSelectTable}: Props) {
         }
     }
 
+    // The focus effect above deliberately won't pull focus in from outside the
+    // tree, so this moves DOM focus itself. Programmatic focus on a
+    // tabindex="-1" row is fine even before the roving index catches up.
+    useCommand('focus.tree', () => {
+        const key = focusedKey;
+        const el = key ? rowRefs.current.get(key) : undefined;
+        if (!el) {
+            treeRef.current?.focus();
+            return;
+        }
+        if (state.focusedKey !== key) setFocus(key);
+        el.focus();
+        el.scrollIntoView({block: 'nearest'});
+    });
+
+    const indexedTables = useMemo(
+        () =>
+            Object.values(state.byKey)
+                .filter((n): n is TableNode => n.kind === 'table')
+                .map((n) => ({
+                    namespace: n.namespace,
+                    name: n.name,
+                    label: [...n.namespace, n.name].join('.'),
+                })),
+        [state.byKey],
+    );
+    const indexComplete = useMemo(
+        () =>
+            state.root.status === 'loaded' &&
+            Object.values(state.byKey).every(
+                (n) =>
+                    n.kind === 'table' ||
+                    (n.namespacesStatus === 'loaded' && n.tablesStatus === 'loaded'),
+            ),
+        [state.root.status, state.byKey],
+    );
+    usePublishTableIndex(indexedTables, indexComplete);
+
+    // Lowest tier: only reached when no table is open, since the metadata and
+    // preview panels register the same command at PRIORITY.TABLE.
+    useCommand(
+        'refresh.scope',
+        () => {
+            const node = focusedKey ? state.byKey[focusedKey] : undefined;
+            if (node?.kind === 'namespace') refreshNode(node.path);
+            else refreshRoot();
+        },
+        true,
+        PRIORITY.TREE,
+    );
+    useCommand('refresh.treeRoot', () => refreshRoot());
+
     if (!connName) {
         return <p className="tree-empty">Pick a connection to start browsing.</p>;
     }
@@ -129,6 +183,8 @@ export function NamespaceTree({connName, selectedTable, onSelectTable}: Props) {
             ref={treeRef}
             className="tree"
             role="tree"
+            // Fallback focus target for Mod+0 when the tree has no rows yet.
+            tabIndex={-1}
             onKeyDown={handleKeyDown}
         >
             <Pending

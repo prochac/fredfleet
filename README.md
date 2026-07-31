@@ -79,6 +79,43 @@ Inspect on Linux: `secret-tool lookup service fredfleet account <connection-name
 
 The app follows your OS dark/light preference automatically via `prefers-color-scheme`. No user setting.
 
+## Keyboard shortcuts
+
+`Mod` is `⌘` on macOS and `Ctrl` on Linux and Windows. Press `?` in the app for
+the same list, rendered for the platform you're on.
+
+| Shortcut | Action |
+|---|---|
+| `Mod+K` | Command palette — jump to a table or run a command |
+| `?` | Keyboard shortcuts |
+| `Mod+,` | Manage connections |
+| `Mod+N` | New connection |
+| `Mod+0` | Focus the namespace tree |
+| `Mod+1` … `Mod+4` | Preview / Schema / Partition spec / Properties |
+| `Mod+L` | Focus the connection picker |
+| `Mod+F` | Focus the preview filter bar |
+| `Mod+R`, `F5` | Refresh the current view |
+| `Mod+Shift+R` | Reload the namespace tree from the root |
+| `Mod+Enter` | Apply filters now, skipping the 300 ms debounce |
+| `Esc` | Close the current dialog |
+
+Within the namespace tree: `↑`/`↓` move, `→` expands, `←` collapses, `Home`/`End`
+jump to the ends, `Enter` opens a table. The tab bar takes `←`/`→` and
+`Home`/`End`. `Tab` moves between the sidebar, the tab bar, and panel controls.
+
+Notes:
+
+- `Mod+F` deliberately shadows the webview's find-in-page — the filter bar is
+  this app's find.
+- The command palette searches **loaded** tables only. The tree fetches children
+  lazily, so a namespace you have never expanded is not indexed; the palette
+  footer says how many tables it currently covers. Table search is
+  diacritic-insensitive, so `zakaznici` finds `zákazníci`.
+- Digit chords match the physical key, so `Mod+1` works on layouts whose number
+  row needs `Shift` for digits (Czech, AZERTY).
+- Window and clipboard shortcuts (`Mod+W`, `Mod+Q`, `Mod+C`/`V`/`X`/`A`) are
+  left to the OS and are never intercepted.
+
 ## Row preview
 
 Selecting a table loads the first page of rows alongside the schema and partition spec. The preview panel offers a filter bar, a page-size selector (100 / 250 / 500), client-side prev/next navigation over the loaded buffer, and a **Load more** button to append the next page.

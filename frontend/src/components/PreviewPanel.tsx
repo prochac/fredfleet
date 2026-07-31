@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useRef, useState} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
     type ColumnDef,
     flexRender,
@@ -8,6 +8,7 @@ import {
 } from '@tanstack/react-table';
 import {CancelPreview, PreviewTable} from '../../wailsjs/go/main/App';
 import {catalog} from '../../wailsjs/go/models';
+import {PRIORITY, useCommand, useRunCommand} from '../shortcuts/registry';
 import {errorMessage, toastError} from '../toast';
 import {Pending} from './Pending';
 
@@ -49,13 +50,19 @@ function placeholderFor(typeText: string): string {
     return 'value';
 }
 
-function useDebounced<T>(value: T, ms: number): T {
+/** Returns the debounced value plus a flush that adopts the latest one now. */
+function useDebounced<T>(value: T, ms: number): [T, () => void] {
     const [v, setV] = useState(value);
+    const latest = useRef(value);
+    latest.current = value;
     useEffect(() => {
         const id = setTimeout(() => setV(value), ms);
         return () => clearTimeout(id);
     }, [value, ms]);
-    return v;
+    // The pending timeout still fires afterwards, but it sets the same value,
+    // so React bails out of the re-render.
+    const flush = useCallback(() => setV(latest.current), []);
+    return [v, flush];
 }
 
 function isEffective(f: FilterEntry): boolean {
@@ -85,7 +92,8 @@ export function PreviewPanel({connName, namespace, name}: Props) {
     const [filters, setFilters] = useState<FilterEntry[]>([]);
     const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
     const [pageIndex, setPageIndex] = useState(0);
-    const debouncedFilters = useDebounced(filters, 300);
+    const [debouncedFilters, flushFilters] = useDebounced(filters, 300);
+    const runCommand = useRunCommand();
 
     // Refs let onPageSizeChange-without-refetch and loadMore use the latest
     // values without making them part of the reset-effect dependency list.
@@ -100,6 +108,10 @@ export function PreviewPanel({connName, namespace, name}: Props) {
     // refetches keep the previous rows visible so the filter UI stays usable
     // and an error doesn't strand the user with no way to recover.
     const lastTableKeyRef = useRef<string | null>(null);
+    const filterBarRef = useRef<HTMLDivElement>(null);
+    // Set when Mod+F had to create a filter row first; the row only exists in
+    // the DOM after the next render, so the focus is deferred to an effect.
+    const wantFilterFocusRef = useRef(false);
 
     const columnsByName = useMemo(() => {
         const out: Record<string, catalog.PreviewColumnDTO> = {};
@@ -268,6 +280,49 @@ export function PreviewPanel({connName, namespace, name}: Props) {
         setFilters((prev) => [...prev, newFilter()]);
     }
 
+    function focusFilterControl(which: 'first' | 'last') {
+        const bar = filterBarRef.current;
+        if (!bar) return;
+        // The value <input> only exists once an op is chosen, so the field
+        // <select> is always the right entry point into a row.
+        const row = which === 'last' ? ':last-of-type' : ':first-of-type';
+        bar.querySelector<HTMLSelectElement>(`.filter-bar-row${row} select.field`)?.focus();
+    }
+
+    useCommand(
+        'focus.filter',
+        () => {
+            // This panel stays mounted but `hidden` on the other tabs, and
+            // nothing inside a hidden subtree can take focus — switch first.
+            runCommand('tab.preview');
+            if (filters.length === 0) {
+                addFilter();
+                wantFilterFocusRef.current = true;
+                return;
+            }
+            requestAnimationFrame(() => focusFilterControl('first'));
+        },
+        !!data,
+    );
+
+    useEffect(() => {
+        if (!wantFilterFocusRef.current) return;
+        wantFilterFocusRef.current = false;
+        focusFilterControl('last');
+    }, [filters.length]);
+
+    useCommand(
+        'refresh.scope',
+        () => {
+            if (inFlightReqIDRef.current) CancelPreview(inFlightReqIDRef.current);
+            setReloadKey((k) => k + 1);
+        },
+        !!data,
+        PRIORITY.TABLE,
+    );
+    useCommand('filters.applyNow', flushFilters, !!data);
+    useCommand('filters.clear', clearFilters, !!data && filters.length > 0);
+
     if (!data) {
         return (
             <Pending
@@ -285,7 +340,7 @@ export function PreviewPanel({connName, namespace, name}: Props) {
 
     return (
         <div className="preview-panel">
-            <div className="filter-bar">
+            <div className="filter-bar" ref={filterBarRef}>
                 {filters.map((f) => {
                     const col = f.field ? columnsByName[f.field] : undefined;
                     const ops = col ? opsForColumn(col) : [];

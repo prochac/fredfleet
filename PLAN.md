@@ -146,15 +146,15 @@ M3b ─┘
 - **Outcome:** filters apply to the whole table, not just the loaded buffer. Unsupported ops surface a clean error through `MapError`.
 - **Operator → iceberg-go mapping:**
 
-  | UI op | iceberg-go constructor |
-  |---|---|
-  | `eq` | `iceberg.EqualTo[T](ref, v)` |
-  | `neq` | `iceberg.NotEqualTo[T](ref, v)` |
+  | UI op                       | iceberg-go constructor                                                                |
+  |-----------------------------|---------------------------------------------------------------------------------------|
+  | `eq`                        | `iceberg.EqualTo[T](ref, v)`                                                          |
+  | `neq`                       | `iceberg.NotEqualTo[T](ref, v)`                                                       |
   | `lt` / `lte` / `gt` / `gte` | `iceberg.LessThan[T]` / `LessThanEqual[T]` / `GreaterThan[T]` / `GreaterThanEqual[T]` |
-  | `isnull` | `iceberg.IsNull(ref)` |
-  | `notnull` | `iceberg.NotNull(ref)` |
-  | `starts` | `iceberg.StartsWith(ref, v)` (strings only) |
-  | (multiple filters) | `iceberg.NewAnd(...)` over the list |
+  | `isnull`                    | `iceberg.IsNull(ref)`                                                                 |
+  | `notnull`                   | `iceberg.NotNull(ref)`                                                                |
+  | `starts`                    | `iceberg.StartsWith(ref, v)` (strings only)                                           |
+  | (multiple filters)          | `iceberg.NewAnd(...)` over the list                                                   |
 
   `ref = iceberg.Reference(fieldName)`. Coercion (string → int64, decimal, date, etc.) lives in `filter.go`.
 - Empty state: filter returned 0 rows → "No rows match the current filters." with a "Clear filters" button.
@@ -184,39 +184,43 @@ M3b ─┘
 
 ### Tasks
 - Keyboard navigation: arrow keys in tree, Tab between panels, Escape to close dialogs *(basics landed)*
-- **Cross-platform keyboard shortcuts** — beyond Tab travel and arrow keys. See follow-up below.
+- ✅ **Cross-platform keyboard shortcuts** — shipped, including a `Mod+K` command palette. See follow-up below.
 - Error toasts for transient errors (network blip, credential expiry) without losing UI state
 - App icon, window title reflects active connection name
 - Build and package for macOS (arm64 + amd64) and Linux
 - README with quickstart: install, configure a connection, run
 
-### Follow-up: richer keyboard shortcuts (cross-platform)
+### Follow-up: richer keyboard shortcuts (cross-platform) — **shipped**
 
-The first keyboard pass covered the bare minimum (tree arrow keys, tablist arrows, Esc on dialogs, a `?` help dialog, Tab travel between panels). What's still missing: chorded shortcuts for the actions a power user reaches for. Must work consistently on macOS (`⌘`), Linux, and Windows (`Ctrl`) — wire through a single `isModifierPressed(e)` helper that picks `metaKey` on macOS and `ctrlKey` elsewhere; don't hard-code `Ctrl`.
+#### What landed
 
-Candidate shortcuts (pick the right subset; not all need to ship):
+- `frontend/src/shortcuts/` — `keys.ts` (platform detection, `KeySpec`, `matches`, `formatShortcut`), `commands.ts` (the `COMMANDS` catalogue), `registry.tsx` (`ShortcutProvider`, `useCommand`, priority tiers), `useGlobalShortcuts.ts` (the single `document` keydown dispatcher), `fuzzy.ts` (diacritic-insensitive scorer).
+- `frontend/src/components/CommandPalette.tsx` + `frontend/src/state/tableIndex.tsx` — `Mod+K` fuzzy jump over loaded tables and live commands.
+- Bindings shipped: `Mod+K`, `Mod+,`, `Mod+N`, `Mod+0`, `Mod+1..4`, `Mod+L`, `Mod+F`, `Mod+R`/`F5`, `Mod+Shift+R`, `Mod+Enter`. `?` and `Esc` carried over.
+- `KeyboardHelpModal` now renders from `COMMANDS`, so the dialog cannot drift from the dispatcher. Shortcut table added to the README.
 
-| Shortcut          | Action                                                                           |
-|-------------------|----------------------------------------------------------------------------------|
-| `Mod+K`           | Command palette / quick switch (open connection / jump to table by fuzzy name)   |
-| `Mod+1`…`Mod+4`   | Jump to Preview / Schema / Partition / Properties tab                            |
-| `Mod+R`           | Refresh current scope (re-fetch namespace children, re-run preview scan)         |
-| `Mod+F`           | Focus the preview filter bar                                                     |
-| `Mod+,`           | Open connection manager ("Manage…")                                              |
-| `Mod+N`           | New connection                                                                   |
-| `Mod+W` / `Mod+Q` | Close window / quit (defer to Wails defaults when they exist)                    |
-| `Slash` (`/`)     | Focus connection picker or quick-search (Gmail/GitHub-style)                     |
-| `g` then `t`      | Vim-style: go to tables (focus tree). Two-key sequences need a small dispatcher. |
+#### Design decisions
 
-Implementation notes for next session:
+- **Command registry, not lifted state.** Components subscribe handlers by id (`useCommand`); the dispatcher looks them up. Chosen over lifting tab/filter/tree state into `App` (which would have fought the `key={selectedConnection}` remount idiom) and over per-panel imperative handles. One catalogue feeds the dispatcher, the help dialog, and the palette.
+- **An unregistered command is inert** — the dispatcher skips `preventDefault()` so the key stays native. Exception: `alwaysPreventDefault` for chords that shadow a destructive browser default (`Mod+R`/`F5` reload the webview and wipe all state; `Mod+F` opens find-in-page).
+- **Priority tiers** resolve `Mod+R`: preview and metadata panels register at `PRIORITY.TABLE` and both fire; the tree registers at `PRIORITY.TREE` and is only reached when no table is open.
+- **Overlay scoping** (`'none' | 'palette' | 'modal'`) replaces an ad-hoc modal check. Nothing fires over a dialog; only `palette.open` fires over the palette, which is what lets `Mod+K` toggle it shut. This also fixed a live bug where `?` inside the manage modal replaced it with the help dialog.
 
-- Centralise the keymap. A `useGlobalShortcuts` hook in `frontend/src/hooks/` registering one `keydown` listener on `document`, dispatching by `(modifier, key)`. Avoid scattering listeners.
-- Per-platform display. The existing `KeyboardHelpModal` should render `⌘K` on mac and `Ctrl+K` elsewhere. Add a `formatShortcut(spec)` helper driven by `navigator.platform` (or `navigator.userAgentData.platform` where available).
-- Don't fight native shortcuts. WebKitGTK passes most modifiers through unless we `preventDefault()`. Cmd+W / Cmd+Q must remain native window controls — don't override.
-- Input-aware suppression. Reuse the same guard as the global `?` handler: skip when focus is inside an `<input>`, `<textarea>`, `<select>`, or contentEditable region — except for `Esc` and `Mod+Enter` (submit) which should still fire.
-- Surface every binding in `KeyboardHelpModal` so it stays discoverable.
+#### Keyboard-layout correctness (the non-obvious part)
 
-Out of scope for this follow-up: app-defined chord macros, user-customisable bindings, recording/exporting shortcut prefs. Park if asked.
+- Digits and punctuation match on `e.code` (`Digit1`, `Comma`): the Czech number row is `ěščřžýáíé` and digits need `Shift`, so `e.key === '1'` would leave `Mod+1` dead. Letters match on `e.key`.
+- **AltGr reports as `ctrlKey + altKey`** on Windows and Linux, and AltGr is how a Czech layout types `[ ] { } @ \ |` — `AltGr+F` is `[`. Every chord requires `!altKey`, otherwise typing a bracket into a filter value would fire (and swallow) `Mod+F`.
+- Dead-key composition (`ˇ` then `s` = `š`) is skipped via `isComposing` / `keyCode === 229`; `e.repeat` is ignored so holding `Mod+R` can't queue dozens of scans.
+- Platform comes from Wails' `Environment()`, not the deprecated `navigator.platform`, with a user-agent seed for first paint.
+
+#### Deliberately not done
+
+- `Slash` (`/`) focus and `g`-then-`t` vim chords — a two-key dispatcher isn't a convention desktop users expect here; `Mod+K` covers the same ground.
+- App-defined chord macros, user-customisable bindings, exporting shortcut prefs. Park if asked.
+
+#### Known gap → next item
+
+The palette indexes **only already-expanded namespaces**, because the tree loads children lazily and nothing crawls the catalog. The palette footer states its coverage rather than reporting a bare "no results". The real fix is a backend `SearchTables(connName, query, limit)` binding doing a cached, cancellable crawl — out of scope here, worth its own item.
 
 ### Validation criteria
 - Full tree → schema → preview flow works with keyboard only

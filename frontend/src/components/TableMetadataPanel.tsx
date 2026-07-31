@@ -1,6 +1,7 @@
-import {KeyboardEvent, useEffect, useRef, useState} from 'react';
+import {KeyboardEvent, useCallback, useEffect, useRef, useState} from 'react';
 import {LoadTable} from '../../wailsjs/go/main/App';
 import {catalog} from '../../wailsjs/go/models';
+import {PRIORITY, useCommand} from '../shortcuts/registry';
 import {Pending} from './Pending';
 import {SchemaPanel} from './SchemaPanel';
 import {PartitionPanel} from './PartitionPanel';
@@ -29,6 +30,23 @@ export function TableMetadataPanel({connName, namespace, name}: Props) {
     const [reloadKey, setReloadKey] = useState(0);
     const [tab, setTab] = useState<Tab>('preview');
     const tabRefs = useRef<Map<Tab, HTMLButtonElement>>(new Map());
+
+    // Mirrors handleTabKey's "switch, then move DOM focus" so a Mod+digit jump
+    // leaves the keyboard in the section the user asked for. tabRefs is empty
+    // until `data` arrives, so the focus call is a no-op while loading.
+    const goToTab = useCallback((next: Tab) => {
+        setTab(next);
+        queueMicrotask(() => tabRefs.current.get(next)?.focus());
+    }, []);
+
+    useCommand('tab.preview', () => goToTab('preview'), !!data);
+    useCommand('tab.schema', () => goToTab('schema'), !!data);
+    useCommand('tab.partition', () => goToTab('partition'), !!data);
+    useCommand('tab.properties', () => goToTab('properties'), !!data);
+
+    // Same tier as the preview's own refresh, so Mod+R reloads both halves of
+    // the open table rather than picking one.
+    useCommand('refresh.scope', () => setReloadKey((k) => k + 1), true, PRIORITY.TABLE);
 
     function handleTabKey(e: KeyboardEvent<HTMLDivElement>) {
         const idx = TABS.findIndex((t) => t.id === tab);
