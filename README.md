@@ -203,3 +203,7 @@ wails build -platform darwin/universal
 wails build -platform windows/amd64
 ```
 
+## License
+
+[Apache License 2.0](LICENSE)
+
