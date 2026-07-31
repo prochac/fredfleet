@@ -6,7 +6,7 @@ import {
     getPaginationRowModel,
     useReactTable,
 } from '@tanstack/react-table';
-import {CancelPreview, PreviewTable} from '../../wailsjs/go/main/App';
+import {CancelRequest, PreviewTable} from '../../wailsjs/go/main/App';
 import {catalog} from '../../wailsjs/go/models';
 import {PRIORITY, useCommand, useRunCommand} from '../shortcuts/registry';
 import {errorMessage, toastError} from '../toast';
@@ -166,7 +166,7 @@ export function PreviewPanel({connName, namespace, name}: Props) {
             });
         return () => {
             cancelled = true;
-            CancelPreview(reqID);
+            CancelRequest(reqID);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [
@@ -219,7 +219,7 @@ export function PreviewPanel({connName, namespace, name}: Props) {
         // re-issue with skip=0, limit=newSize. The reset effect picks up
         // pageSizeRef.current set below.
         if (inFlightReqIDRef.current) {
-            CancelPreview(inFlightReqIDRef.current);
+            CancelRequest(inFlightReqIDRef.current);
             inFlightReqIDRef.current = null;
         }
         pageSizeRef.current = newSize;
@@ -314,7 +314,7 @@ export function PreviewPanel({connName, namespace, name}: Props) {
     useCommand(
         'refresh.scope',
         () => {
-            if (inFlightReqIDRef.current) CancelPreview(inFlightReqIDRef.current);
+            if (inFlightReqIDRef.current) CancelRequest(inFlightReqIDRef.current);
             setReloadKey((k) => k + 1);
         },
         !!data,

@@ -19,6 +19,9 @@ const (
 	listTimeout    = 10 * time.Second
 	loadTimeout    = 30 * time.Second
 	previewTimeout = 60 * time.Second
+	// A cold SearchTables crawls every namespace in the catalog, so it gets
+	// the same budget as a scan rather than the 10s a single list call gets.
+	searchTimeout = 60 * time.Second
 )
 
 type App struct {
@@ -27,6 +30,7 @@ type App struct {
 	keyring  *connections.Keyring
 	registry *catalog.Registry
 	requests *catalog.RequestRegistry
+	searcher *catalog.TableSearcher
 	icon     []byte
 }
 
@@ -40,6 +44,7 @@ func NewApp(icon []byte) (*App, error) {
 		keyring:  connections.NewKeyring(),
 		registry: catalog.NewRegistry(),
 		requests: catalog.NewRequestRegistry(),
+		searcher: catalog.NewTableSearcher(),
 		icon:     icon,
 	}, nil
 }
@@ -78,6 +83,7 @@ func (a *App) SaveConnection(c connections.Connection, secret, s3Secret string) 
 		}
 	}
 	a.registry.Invalidate(c.Name)
+	a.searcher.Invalidate(c.Name)
 	return nil
 }
 
@@ -93,6 +99,7 @@ func (a *App) DeleteConnection(name string) error {
 		wruntime.LogError(a.ctx, "delete s3 secret: "+err.Error())
 	}
 	a.registry.Invalidate(name)
+	a.searcher.Invalidate(name)
 	return nil
 }
 
@@ -211,9 +218,42 @@ func (a *App) PreviewTable(reqID, connName string, namespace []string, name stri
 	return dto, err
 }
 
-// CancelPreview cancels an in-flight PreviewTable call by its reqID.
-// Idempotent and safe to call on an unknown ID — returns nil either way.
-func (a *App) CancelPreview(reqID string) error {
+// SearchTables returns tables whose fully-qualified name fuzzy-matches query,
+// across the *whole* catalog rather than only the namespaces the tree has
+// expanded. The first call for a connection crawls every namespace and caches
+// the result; later calls hit the cache until it expires (5 min) or is
+// invalidated by SaveConnection / DeleteConnection / RefreshTableIndex.
+//
+// limit ≤ 0 defaults to 500. The returned DTO reports the total match count
+// and whether the crawl covered the whole catalog. reqID cancels an in-flight
+// crawl via CancelRequest; pass "" to opt out.
+func (a *App) SearchTables(reqID, connName, query string, limit int) (*catalog.TableSearchDTO, error) {
+	var dto *catalog.TableSearchDTO
+	err := a.withCatalog(connName, "search tables", func(cat *rest.Catalog) error {
+		reqCtx, release := a.requests.Register(a.ctx, reqID)
+		defer release()
+		ctx, cancel := context.WithTimeout(reqCtx, searchTimeout)
+		defer cancel()
+		var err error
+		dto, err = a.searcher.Search(ctx, connName, cat, query, limit)
+		return err
+	})
+	return dto, err
+}
+
+// RefreshTableIndex drops the cached table index for a connection so the next
+// SearchTables re-crawls. Wired to the frontend's "reload the tree from the
+// root" gesture — the app's single "forget what you know about this catalog"
+// action.
+func (a *App) RefreshTableIndex(connName string) error {
+	a.searcher.Invalidate(connName)
+	return nil
+}
+
+// CancelRequest cancels an in-flight cancellable call (PreviewTable,
+// SearchTables) by its reqID. Idempotent and safe to call on an unknown ID —
+// returns nil either way.
+func (a *App) CancelRequest(reqID string) error {
 	a.requests.Cancel(reqID)
 	return nil
 }

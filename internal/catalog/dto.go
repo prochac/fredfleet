@@ -14,6 +14,18 @@ type TableDTO struct {
 	Name      string   `json:"name"`
 }
 
+// TableSearchDTO is the payload of SearchTables. Tables holds the matches, cut
+// off at the requested limit; Matched is how many matched before the cut, so
+// the UI can ask for a narrower query instead of silently hiding rows. Indexed
+// is the size of the crawled index, and Complete is false when the crawl was
+// cut short by a safety cap or an unreadable namespace.
+type TableSearchDTO struct {
+	Tables   []TableDTO `json:"tables"`
+	Matched  int        `json:"matched"`
+	Indexed  int        `json:"indexed"`
+	Complete bool       `json:"complete"`
+}
+
 // FieldKind classifies a schema field for the recursive renderer on the
 // frontend. The frontend uses Kind to decide whether to show a disclosure
 // triangle and recurse into Children.
