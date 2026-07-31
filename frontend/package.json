@@ -12,13 +12,13 @@
   "dependencies": {
     "@tanstack/react-table": "^8.20.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0",
+    "react-dom": "^19.2.8",
     "sonner": "^1.7.4"
   },
   "devDependencies": {
     "@types/node": "^18.19.130",
     "@types/react": "^18.0.17",
-    "@types/react-dom": "^18.0.6",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^2.0.1",
     "typescript": "^4.6.4",
     "vite": "^3.0.7",
