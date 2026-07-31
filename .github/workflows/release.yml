@@ -37,6 +37,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev pkg-config
 
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+
       - name: Stub embedded frontend assets
         run: |
           mkdir -p frontend/dist
@@ -44,6 +47,12 @@ jobs:
 
       - name: go test -race
         run: go test -race -tags webkit2_41 ./...
+
+      # The frontend tests import modules that import frontend/wailsjs, which
+      # is generated and gitignored — without this, vitest fails to resolve
+      # ../../wailsjs/... and every suite that touches the bindings dies.
+      - name: Generate Wails bindings
+        run: wails generate module -tags webkit2_41
 
       - run: npm ci
         working-directory: frontend
