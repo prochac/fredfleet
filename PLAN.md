@@ -81,14 +81,41 @@ Four sequential milestones. Each is a shippable checkpoint:
 
 ---
 
-## Milestone 3 — Row preview *(data reading)*
+## Milestone 3 — Row preview *(data reading)* — **shipped**
+
+### What landed
+
+All five sub-milestones shipped in order, one commit each:
+
+- **M3a** (`974b605`) — `internal/catalog/preview.go`: Arrow record-batch → `[]map[string]any` with the CLAUDE.md coercions (decimal → string, timestamp/timestamptz → ISO-8601, date → `YYYY-MM-DD`, bytes/fixed → base64, nested → `[]any`/`map[string]any`, null → JSON `null`). `PreviewRowsDTO`/`PreviewColumnDTO`, `PreviewTable` binding, `previewTimeout = 60s`, streaming `Scan(WithLimit).ToArrowRecords`. `arrow-go/v18` promoted to a direct dep.
+- **M3b** (`661aeb3`) — `PreviewPanel.tsx` on `@tanstack/react-table` v8; auto-loads the first page, nulls render italic/muted, nested cells as single-line JSON.
+- **M3c** (`037dc4f`) — `internal/catalog/cancel.go`: `RequestRegistry` over `sync.Map`; frontend mints a UUID per fetch and cancels from the `useEffect` cleanup.
+- **M3d** (`486b771`) — `internal/catalog/filter.go`: `BuildRowFilter` with per-type literal coercion and an `ErrFilter` sentinel surfaced verbatim through `MapError`; standalone filter bar (one row per filter, multiple filters per column), 300 ms debounce + reqID cancel.
+- **M3e** (`a1289ca`) — `skip` offset scanning `skip+limit+1` so the trailing probe row sets `HasMore`; page-size selector, client-side prev/next, Load-more that appends without duplicates.
+
+### Scope deviations during M3
+
+- **`starts` dropped, not shipped** — the operator table below lists `iceberg.StartsWith`, but iceberg-go v0.5.0 builds the per-record filter through Arrow's substrait evaluator, which has no scalar mapping for `starts_with`; the scan died with `not implemented: starts_with` inside `arrow_scanner.go`. Removed from the UI and rejected at the boundary with a message naming the upstream gap. Documented in the README.
+- **Tabbed metadata panel, not a 4th stacked section** — M3b slotted Preview under Properties as planned, then M3d replaced the stack with a tab bar (Preview / Schema / Partition spec / Properties, default Preview). The preview table needs the full panel width, and the M2 "cross-reference partition against schema without clicking" argument doesn't extend to rows. All panels stay mounted via `hidden`, so Preview keeps its rows and filter state across tab switches.
+- **`BuildRowFilter` returns an *unbound* expression** — it trial-binds for early validation and throws the result away. iceberg-go's scanner re-binds `rowFilter` unconditionally (`table/scanner.go:510`) and panics on already-bound predicates (`visitors.go:183`); under Wails/WebKit that panic kills the process, because the WebKit-installed SIGSEGV handler isn't `SA_ONSTACK`-safe. `BuildPreviewRows` also carries a `defer recover()` net.
+- **Object-store IO was the real prerequisite** — reading data files (not just metadata) forced three unplanned fixes mid-milestone: registering iceberg-go's S3/GCS/Azure IO factories (`a4315b5`), optional explicit S3 credentials per connection (`7083eb7`), and the `Registry.Do` auth-expired retry that works around iceberg-go's forever-cached OAuth token (`684a008`).
+- **`CancelPreview` → `CancelRequest`** — renamed in M4 (`1f83bae`) once `SearchTables` began sharing the same `RequestRegistry`.
+
+### Validation status
+
+- ✅ `go vet ./...`, `go test ./...`, and `tsc --noEmit` clean; `preview_test.go` + `filter_test.go` cover the coercions and the filter translation.
+- ✅ Preview renders decimals/timestamps/dates/bytes readably against the live Lakekeeper test catalog; nulls visually distinct.
+- ✅ Filters execute server-side against the live catalog — the `starts_with` failure and the "bad filter stranded the user with no way to edit it back" fix both came out of real runtime use, not review.
+- ⏳ The whole-table filter proof (match a value that only exists past row 100) wasn't run as an explicit check.
+- ⏳ The M3c goroutine-leak measurement (`runtime.NumGoroutine()` back to baseline within 5 s) wasn't run; cancellation is wired and observed to stop scans, but the count was never taken.
+- ⏳ Load-more duplicate check and the 100 → 500 / 500 → 100 page-size semantics implemented per spec, not re-verified live after `a1289ca`.
 
 ### Scope decisions (locked in for M3)
 
 - **Table library:** `@tanstack/react-table` v8. Justifies the React-over-Vue choice in CLAUDE.md.
 - **Default page size:** 100 rows. User selector for 100 / 250 / 500.
 - **Filter scope:** server-side via `table.Scan(iceberg.WithRowFilter(...))`, debounced ~300 ms. Filters apply to the whole table, not just the loaded page. Multiple filters AND-combined.
-- **Operators:** `=`, `!=`, `<`, `<=`, `>`, `>=`, `IS NULL`, `IS NOT NULL`, `StartsWith` (strings only). **No CONTAINS** — iceberg-go v0.5.0 has no LIKE/regex; document in README.
+- **Operators:** `=`, `!=`, `<`, `<=`, `>`, `>=`, `IS NULL`, `IS NOT NULL`, ~~`StartsWith` (strings only)~~ *(dropped in M3e — see deviations)*. **No CONTAINS** — iceberg-go v0.5.0 has no LIKE/regex; document in README.
 - **Pagination after filter:** "Load more" button (scan-and-discard; iceberg-go has no `OFFSET`).
 - **Auto-load** first page once `LoadTable` returns; **cancel in-flight scan** on unmount or re-fetch.
 - **No virtualization in M3.**
@@ -153,7 +180,7 @@ M3b ─┘
   | `lt` / `lte` / `gt` / `gte` | `iceberg.LessThan[T]` / `LessThanEqual[T]` / `GreaterThan[T]` / `GreaterThanEqual[T]` |
   | `isnull`                    | `iceberg.IsNull(ref)`                                                                 |
   | `notnull`                   | `iceberg.NotNull(ref)`                                                                |
-  | `starts`                    | `iceberg.StartsWith(ref, v)` (strings only)                                           |
+  | ~~`starts`~~                | ~~`iceberg.StartsWith(ref, v)` (strings only)~~ — **not shipped**, no substrait mapping |
   | (multiple filters)          | `iceberg.NewAnd(...)` over the list                                                   |
 
   `ref = iceberg.Reference(fieldName)`. Coercion (string → int64, decimal, date, etc.) lives in `filter.go`.

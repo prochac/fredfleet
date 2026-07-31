@@ -30,15 +30,21 @@ func TestBuildRowFilter_Empty(t *testing.T) {
 	}
 }
 
-func TestBuildRowFilter_StartsOnIntRejected(t *testing.T) {
-	_, err := BuildRowFilter(testSchema(), []PreviewFilterDTO{
-		{Field: "id", Op: "starts", Value: "1"},
-	})
-	if !errors.Is(err, ErrFilter) {
-		t.Fatalf("expected ErrFilter, got %v", err)
-	}
-	if !strings.Contains(err.Error(), "only supports string") {
-		t.Fatalf("expected message about string-only, got %q", err.Error())
+// `starts` is rejected for every column type, not just non-strings: iceberg-go
+// v0.5.0's substrait evaluator has no starts_with mapping, so the scan would
+// fail deep inside arrow_scanner.go. The UI hides the operator; this guards the
+// backend message in case something else sends it.
+func TestBuildRowFilter_StartsRejected(t *testing.T) {
+	for _, field := range []string{"id", "name"} {
+		_, err := BuildRowFilter(testSchema(), []PreviewFilterDTO{
+			{Field: field, Op: "starts", Value: "A"},
+		})
+		if !errors.Is(err, ErrFilter) {
+			t.Fatalf("field %q: expected ErrFilter, got %v", field, err)
+		}
+		if !strings.Contains(err.Error(), "not supported") {
+			t.Fatalf("field %q: expected unsupported-operator message, got %q", field, err.Error())
+		}
 	}
 }
 
@@ -87,7 +93,8 @@ func TestBuildRowFilter_BoolOrderedRejected(t *testing.T) {
 func TestBuildRowFilter_AndCombined(t *testing.T) {
 	expr, err := BuildRowFilter(testSchema(), []PreviewFilterDTO{
 		{Field: "id", Op: "gt", Value: "100"},
-		{Field: "name", Op: "starts", Value: "A"},
+		{Field: "name", Op: "eq", Value: "A"},
+		{Field: "born", Op: "lte", Value: "1990-01-01"},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
