@@ -8,9 +8,11 @@ This document describes the system as it stands — what it does, how it is put
 together, and why each non-obvious choice was made.
 
 **Status:** feature-complete against the MVP scope. Everything described below
-is in the tree and green (`go vet ./...`, `go test ./...`, `tsc --noEmit`,
-`vitest`). What remains is the first release tag and the manual checks that
-nothing but a human at a keyboard can make — see [Open items](#open-items).
+is in the tree and green (`go vet ./...`, `golangci-lint run`,
+`go test -race ./...`, `tsc --noEmit`, `vitest`), and [CI](#ci) runs all of it
+plus a three-platform build on every push. What remains is the first release
+tag and the manual checks that nothing but a human at a keyboard can make — see
+[Open items](#open-items).
 
 ---
 
@@ -441,9 +443,16 @@ look unmotivated.
 ## Testing
 
 ```bash
-go test ./...                # backend
+go test -race ./...          # backend
 npm test --prefix frontend   # vitest
+golangci-lint run            # .golangci.yml; CI pins the same version
 ```
+
+Every Go tool here needs `frontend/dist` to exist, because `main.go` embeds it
+and it is gitignored — on a fresh clone they all fail with
+`pattern all:frontend/dist: no matching files found` before compiling a line.
+Build the frontend once, or drop a placeholder `index.html` there, which is
+what CI does.
 
 `internal/catalog/fixture_test.go` builds a **real** Iceberg table on local disk
 via an in-memory `table.CatalogIO` and runs assertions through
@@ -470,17 +479,62 @@ What the executable proofs cover:
 | `TestStartsWithStillUnsupportedUpstream`   | The `starts` rejection is still warranted: a real `iceberg.StartsWith` scan against a string column still dies with `not implemented: starts_with`. Fails loudly if `arrow-go` ever ships the mapping                                                       |
 | `preview_test.go`, `filter_test.go`        | Type coercions and filter translation                                                                                                                                                                                                                      |
 | `search_test.go`                           | Crawl, cache and matcher behaviour                                                                                                                                                                                                                         |
+| `connections/store_test.go`                | Upsert-by-name, stable order, no-op delete, 0600 + atomic rename with no stray `.tmp`, a corrupt file refusing to be clobbered, concurrent saves losing nothing, and — structurally — that no secret-shaped field can reach `connections.json`             |
+| `connections/keyring_test.go`              | Round-trip, missing entry as `""` rather than an error, idempotent delete, the `:s3` suffix keeping the two secrets apart, and a broken backend surfacing instead of yielding an empty secret. Runs against `keyring.MockInit()`, so CI needs no keychain    |
 | `frontend/src/state/pageSize.test.ts`      | 100 → 500 re-fetches at a 200-row buffer; 500 → 100 slices client-side; plus the boundary, no-op and cold-buffer cases                                                                                                                                     |
+| `frontend/src/state/treeStore.test.ts`     | Collapse and re-expand keeps loaded children and their `loaded` status — the no-re-fetch invariant; the two child slots fill independently; a parent reload does not replace a known child node; `flattenVisible` / `parentKey` ordering and dangling keys  |
+| `frontend/src/shortcuts/keys.test.ts`      | The layout rules: Ctrl vs Cmd per platform, the other modifier locking a chord out, AltGr (`ctrl+alt`) never firing, `Mod+R` vs `Mod+Shift+R`, `shift: 'any'`, digits by `e.code` on a Czech row, letters by `e.key`, and an empty `code` matching nothing  |
+| `frontend/src/shortcuts/fuzzy.test.ts`     | Diacritic folding both directions, positions indexing the *original* accented string, and the ranking rules (word start, tight run, separator acronym, shorter target)                                                                                     |
 
 ---
+
+## CI
+
+`.github/workflows/ci.yml` runs on push to `master`, on pull requests and on
+demand:
+
+- **go** — `go mod tidy -diff`, `go vet`, `golangci-lint`, `go test -race`.
+- **frontend** — `wails generate module` (the TS sources import the generated
+  bindings, which are gitignored), then `npm ci`, `vitest`, and `npm run build`
+  — the same `tsc && vite build` that `wails build` shells out to, so a type
+  error fails here instead of at release time.
+- **build** — `wails build` on `ubuntu-24.04`, `macos-14` and `windows-2022`,
+  gated on the two above. This is the only continuous evidence that the macOS
+  and Windows legs compile, since the app has only ever been *run* on Linux.
+
+Both Go jobs write a placeholder `frontend/dist/index.html` first, for the
+embed reason described under [Testing](#testing).
+
+Dependabot (`.github/dependabot.yml`) tracks gomod, npm and the actions
+themselves, weekly, with minor/patch grouped. `typescript` and `@types/node`
+are ignored outright — they are pinned together and unpin together — and minor
+or major bumps of `iceberg-go` and `wails/v2` are held back for a human,
+because both carry the constraints this document records.
 
 ## Release and packaging
 
 `.github/workflows/release.yml` builds `linux/amd64`, `darwin/universal` and
-`windows/amd64`, and drafts a GitHub release on a `v*` tag. It also accepts
-`workflow_dispatch`, which runs the three build legs and uploads artifacts
-without drafting a release (the release job is gated on `refs/tags/v`) — that is
-the way to smoke-test the pipeline before spending a tag.
+`windows/amd64`, and drafts a GitHub release on a `v*` tag. The three build
+legs are gated on a `test` job (`go test -race` + `vitest`), so a tag cannot
+ship a binary whose tests are red. It also accepts `workflow_dispatch`, which
+runs the build legs and uploads artifacts without drafting a release (the
+release job is gated on `refs/tags/v`) — that is the way to smoke-test the
+pipeline before spending a tag.
+
+`wails build` has no version flag: it reads `info.productVersion` out of
+`wails.json` and templates it into `CFBundleVersion` /
+`CFBundleShortVersionString` and the Windows VERSIONINFO resource. Each build
+leg therefore runs `.github/scripts/stamp-version.sh`, which rewrites that
+field from the tag; the checked-in value stays `0.0.0` so a local build is
+never mistaken for a release. A prerelease tag is stamped as its numeric core
+(`v1.2.0-rc1` → `1.2.0`), because the Windows resource only accepts `X.Y.Z` —
+asset filenames still carry the full tag.
+
+GoReleaser was considered and does not fit: it cannot produce a macOS `.app`
+bundle or drive Wails' resource templating, and the hard part here is
+cgo-linked WebKit/WebView2, which wants a native runner per platform anyway.
+Three `wails build` legs on three runners is both simpler and closer to what
+`wails build` does locally.
 
 Releases are **unsigned**: macOS needs the quarantine attribute removed, Windows
 shows a SmartScreen warning. Documented in the README rather than solved; code
@@ -503,9 +557,11 @@ Nothing here is code work. Everything left is a release action or a check that
 only a human can perform.
 
 - ⏳ **Publish.** The `origin` remote is empty — no branch has ever been pushed
-  and no tag cut, so the release workflow has never run. Push, smoke the
-  pipeline via `workflow_dispatch`, then tag. The macOS and Windows legs,
-  artifact naming and the release step are all unverified until then.
+  and no tag cut, so neither workflow has ever run. Push `master`, let CI go
+  green, smoke the release pipeline via `workflow_dispatch`, then tag. The
+  macOS and Windows legs, artifact naming and the release step are all
+  unverified until then. GitHub's repo default branch must also be set to
+  `master`, or the CI push trigger never fires.
 - ⏳ **Packaged binary runs on a clean machine** with no Go toolchain — blocked
   on the tag above.
 - ⏳ **Dark mode follows a live OS change.** Flip the system setting with the app

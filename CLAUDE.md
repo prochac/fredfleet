@@ -33,11 +33,9 @@ Fixed in `iceberg-go` v0.6.0 — recorded so they don't get re-added from memory
 - ~~`go mod tidy` breaks the build (substrait v7/v8 conflict).~~ v0.6.0 moved to `substrait-go/v8` v8.1.1 + `substrait-protobuf` v0.85.0; `arrow-go` is unpinned at v18.7.0 and `go mod tidy -diff` is clean. The general "pin to tagged releases, don't chase `main`" preference stands on its own; this specific hazard is gone.
 - ~~Data race in the scan planner.~~ `exprEvaluator.Eval` now copies the evaluator per call instead of writing `e.st` on a struct shared across errgroup workers. `go test -race ./...` is clean — the "keep `-race` off the default test command" carve-out is retired.
 
-## Layout
-
 ## Build (Linux)
 
-Pass `-tags webkit2_41` to `wails dev`/`wails build` on Arch and any distro that ships only webkit2gtk-4.1. Wails still defaults to the 4.0 ABI as of 2.13 (`#cgo !webkit2_41 pkg-config: webkit2gtk-4.0`); without the tag, `wails doctor` reports "libwebkit Not Found" even when 4.1 is installed. Keep the CLI version (`WAILS_VERSION` in `release.yml`, and the install line in the README) in step with the `wails/v2` version in `go.mod`.
+Pass `-tags webkit2_41` to `wails dev`/`wails build` on Arch and any distro that ships only webkit2gtk-4.1. Wails still defaults to the 4.0 ABI as of 2.13 (`#cgo !webkit2_41 pkg-config: webkit2gtk-4.0`); without the tag, `wails doctor` reports "libwebkit Not Found" even when 4.1 is installed. Keep the CLI version (`WAILS_VERSION` in `ci.yml` **and** `release.yml`, plus the install line in the README) in step with the `wails/v2` version in `go.mod`.
 
 ```bash
 wails dev   -tags webkit2_41
@@ -55,12 +53,21 @@ wails build -tags webkit2_41 -platform linux/amd64
 ## Tests
 
 ```bash
-go test ./...          # backend; internal/catalog builds a real local Iceberg table as a fixture
+go test -race ./...          # backend; internal/catalog builds a real local Iceberg table as a fixture
 npm test --prefix frontend   # vitest
+golangci-lint run            # config in .golangci.yml; CI runs the same version
 ```
 
 `internal/catalog/fixture_test.go` creates an unpartitioned Iceberg table under `t.TempDir()` via an in-memory `table.CatalogIO`, so the preview/filter/pagination tests run through the same `BuildPreviewRows` the app calls. It avoids iceberg-go's SQL catalog on purpose — that import pulls in `bun` + `modernc.org/sqlite`, which was fatal under v0.5.0 (the forced tidy tripped the substrait conflict) and is merely unwanted weight in a shipped binary now. `table.CatalogIO` is two methods; the in-memory version costs no dependencies.
 
-`-race` is clean as of iceberg-go v0.6.0 and worth running.
+`-race` is clean as of iceberg-go v0.6.0 and is what CI runs. (The old "skip `-race` on `./internal/catalog/`" carve-out was for the v0.5.0 scan-planner race and is retired — don't re-add it.)
 
-Skip `-race` on `./internal/catalog/` unless you want the known upstream iceberg-go report.
+`internal/connections` covers the JSON store and the keyring wrapper; the keyring tests run against `keyring.MockInit()`, so they need no Secret Service, Keychain or WinCred. On the frontend, `keys.test.ts` and `fuzzy.test.ts` pin the layout-correctness rules (`e.code` for digits, AltGr as ctrl+alt, `shift: 'any'`) and the palette's scoring, `treeStore.test.ts` pins the no-re-fetch-on-re-expand invariant.
+
+**Go tooling needs `frontend/dist` to exist.** `main.go` embeds it with `//go:embed all:frontend/dist`, and it is gitignored, so on a fresh clone `go vet`, `go test`, `golangci-lint` and even `wails generate module` all fail with `pattern all:frontend/dist: no matching files found` before reading any Go code. Either build the frontend once or drop a placeholder `index.html` in there — CI does the latter.
+
+## CI
+
+- `.github/workflows/ci.yml` on push/PR: Go vet + golangci-lint + `go test -race`; frontend typecheck, vitest and `npm run build`; then `wails build` on all three platforms. The frontend job runs `wails generate module` first, because `frontend/wailsjs` is generated and gitignored and the TS sources import from it.
+- `.github/workflows/release.yml` on a `v*` tag: the same tests gate three native build legs. `.github/scripts/stamp-version.sh` rewrites `info.productVersion` in `wails.json` from the tag — `wails build` has no version flag, and that field feeds `CFBundleVersion` and the Windows VERSIONINFO resource. The checked-in value stays `0.0.0`.
+- Dependabot ignores `typescript` and `@types/node` (they unpin together, see above) and holds minor/major bumps of `iceberg-go` and `wails/v2` for a human, since both carry the constraints DESIGN.md documents.

@@ -181,7 +181,13 @@ Each fetch is **scan-and-discard**: the server iterates the Arrow stream from ro
 
 ### First clone
 
-The `frontend/wailsjs/` directory is gitignored because it's regenerated on every `wails dev` / `wails build`. After cloning, run `wails dev` once before TypeScript imports will resolve.
+Two generated directories are gitignored: `frontend/wailsjs/` (the Go bindings the TypeScript imports) and `frontend/dist/` (the built assets `main.go` embeds). Run a full build once after cloning — it produces both, in the right order:
+
+```bash
+wails build -tags webkit2_41    # drop the tag off Linux
+```
+
+Until then `go build`, `go test`, `golangci-lint` and `tsc` all fail on the missing halves — the Go side with `pattern all:frontend/dist: no matching files found`, the TS side with unresolved `../../wailsjs/...` imports.
 
 ### Daily workflow
 
@@ -189,6 +195,16 @@ The `frontend/wailsjs/` directory is gitignored because it's regenerated on ever
 wails dev      # hot-reload Go + Vite, opens devtools
 wails build    # production binary in build/bin/
 ```
+
+### Tests and lint
+
+```bash
+go test -race ./...
+npm test --prefix frontend
+golangci-lint run              # https://golangci-lint.run, config in .golangci.yml
+```
+
+CI runs all three plus a `wails build` on Linux, macOS and Windows for every push and pull request.
 
 **On Linux (Arch and other distros that ship webkit2gtk-4.1):** add `-tags webkit2_41`. Wails 2.13 still defaults to the older 4.0 ABI.
 
