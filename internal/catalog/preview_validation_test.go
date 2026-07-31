@@ -11,15 +11,17 @@ import (
 	"github.com/apache/iceberg-go/table"
 )
 
-// The tests in this file discharge the three validation criteria PLAN.md left
-// open at the end of M3. Each one exercises BuildPreviewRows — the function
-// App.PreviewTable delegates to — against a real Iceberg table on local disk,
-// so the proof covers the actual scan path rather than a stand-in.
+// The tests in this file prove the three preview behaviours that are easy to
+// implement per spec and hard to verify by inspection: a filter reaching the
+// whole table, a cancelled scan releasing its goroutines, and Load-more
+// tiling pages without duplicates. Each exercises BuildPreviewRows — the
+// function App.PreviewTable delegates to — against a real Iceberg table on
+// local disk, so the proof covers the actual scan path rather than a stand-in.
 
-// --- M3d: whole-table filter proof ---------------------------------------
+// --- whole-table filter proof --------------------------------------------
 
-// TestFilterMatchesRowPastFirstPage is the "whole-table filter proof" from
-// PLAN.md § M3d: a filter must reach the scan, not just the loaded page.
+// TestFilterMatchesRowPastFirstPage is the "whole-table filter proof": a filter
+// must reach the scan, not just the loaded page.
 //
 // The fixture plants tag="needle" on exactly one row, id=250, and the preview
 // limit is 100. If filtering were applied client-side to the first page, the
@@ -95,7 +97,7 @@ func TestFilterOnUnmatchedValueReturnsNoRows(t *testing.T) {
 	}
 }
 
-// --- M3e: pagination has no duplicates -----------------------------------
+// --- pagination has no duplicates ----------------------------------------
 
 // TestLoadMoreProducesNoDuplicates walks the exact sequence the frontend's
 // loadMore performs — skip = len(rows loaded so far), limit = page size — and
@@ -172,8 +174,8 @@ func TestHasMoreAtExactPageBoundary(t *testing.T) {
 	}
 }
 
-// TestPaginationUnderFilterHasNoDuplicates covers the combination M3e's
-// validation criterion actually names: Load more *under an active filter*.
+// TestPaginationUnderFilterHasNoDuplicates covers the combination the criterion
+// actually names: Load more *under an active filter*.
 // Every third row matches, so skip has to count filtered rows, not table rows.
 func TestPaginationUnderFilterHasNoDuplicates(t *testing.T) {
 	const (
@@ -219,7 +221,7 @@ func TestPaginationUnderFilterHasNoDuplicates(t *testing.T) {
 	}
 }
 
-// --- M3c: cancelling a scan releases its goroutines ------------------------
+// --- cancelling a scan releases its goroutines -----------------------------
 
 // slowIO wraps a real IO but makes every Open block, modelling a slow object
 // store. The delay is cancellable through the context the FSysF was called
@@ -248,7 +250,7 @@ func slowFS(delay time.Duration) table.FSysF {
 	}
 }
 
-// TestCancelledScanReleasesGoroutines discharges PLAN.md § M3c: after
+// TestCancelledScanReleasesGoroutines is the cancellation proof: after
 // cancelling an in-flight scan, runtime.NumGoroutine() returns to baseline
 // within 5 s.
 //

@@ -15,9 +15,9 @@ import (
 	"github.com/apache/iceberg-go/table"
 )
 
-// This file builds a *real* Iceberg table on the local filesystem so the M3
-// validation criteria in PLAN.md can be checked against the same code path the
-// app uses (BuildPreviewRows), rather than against a mock.
+// This file builds a *real* Iceberg table on the local filesystem so the
+// preview tests run against the same code path the app uses
+// (BuildPreviewRows), rather than against a mock.
 //
 // It deliberately avoids iceberg-go's SQL catalog: pulling that in drags bun +
 // modernc.org/sqlite into go.mod and `go mod tidy` then bumps arrow-go, wails
@@ -59,7 +59,7 @@ func (c *memCatalog) CommitTable(
 }
 
 // fixtureSchema is shared by every fixture table: an id, a filler column, and
-// a `tag` column used to plant a value deep in the table for the M3d proof.
+// a `tag` column used to plant a value deep in the table for the filter proof.
 func fixtureSchema() (*iceberg.Schema, *arrow.Schema) {
 	ice := iceberg.NewSchema(0,
 		iceberg.NestedField{ID: 1, Name: "id", Type: iceberg.PrimitiveTypes.Int64, Required: true},

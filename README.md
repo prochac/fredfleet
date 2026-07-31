@@ -2,7 +2,7 @@
 
 Desktop app for browsing Apache Iceberg catalogs. Built with [Wails v2](https://wails.io) (Go backend + React/TypeScript frontend) on top of [`iceberg-go`](https://github.com/apache/iceberg-go).
 
-Status: M4 — connection manager, namespace tree, schema viewer, row preview with filters and pagination, error toasts, and signed-by-omission release builds. See [`PLAN.md`](PLAN.md).
+Status: feature-complete, unreleased — connection manager, namespace tree, schema viewer, row preview with filters and pagination, command palette, error toasts, and unsigned release builds. See [`DESIGN.md`](DESIGN.md).
 
 ## Install
 
@@ -93,21 +93,21 @@ detection for every GTK app; pinning fixes just this one.
 `Mod` is `⌘` on macOS and `Ctrl` on Linux and Windows. Press `?` in the app for
 the same list, rendered for the platform you're on.
 
-| Shortcut | Action |
-|---|---|
-| `Mod+K` | Command palette — jump to a table or run a command |
-| `?` | Keyboard shortcuts |
-| `Mod+,` | Manage connections |
-| `Mod+N` | New connection |
-| `Mod+Shift+D` | Switch theme (system → light → dark) |
-| `Mod+0` | Focus the namespace tree |
-| `Mod+1` … `Mod+4` | Preview / Schema / Partition spec / Properties |
-| `Mod+L` | Focus the connection picker |
-| `Mod+F` | Focus the preview filter bar |
-| `Mod+R`, `F5` | Refresh the current view |
-| `Mod+Shift+R` | Reload the namespace tree from the root |
-| `Mod+Enter` | Apply filters now, skipping the 300 ms debounce |
-| `Esc` | Close the current dialog |
+| Shortcut          | Action                                             |
+|-------------------|----------------------------------------------------|
+| `Mod+K`           | Command palette — jump to a table or run a command |
+| `?`               | Keyboard shortcuts                                 |
+| `Mod+,`           | Manage connections                                 |
+| `Mod+N`           | New connection                                     |
+| `Mod+Shift+D`     | Switch theme (system → light → dark)               |
+| `Mod+0`           | Focus the namespace tree                           |
+| `Mod+1` … `Mod+4` | Preview / Schema / Partition spec / Properties     |
+| `Mod+L`           | Focus the connection picker                        |
+| `Mod+F`           | Focus the preview filter bar                       |
+| `Mod+R`, `F5`     | Refresh the current view                           |
+| `Mod+Shift+R`     | Reload the namespace tree from the root            |
+| `Mod+Enter`       | Apply filters now, skipping the 300 ms debounce    |
+| `Esc`             | Close the current dialog                           |
 
 Within the namespace tree: `↑`/`↓` move, `→` expands, `←` collapses, `Home`/`End`
 jump to the ends, `Enter` opens a table. The tab bar takes `←`/`→` and
@@ -143,15 +143,15 @@ Transient errors during refresh, filter changes, or **Load more** appear as toas
 
 Filters are pushed down to the iceberg-go scan (server-side). Multiple filters are AND-combined.
 
-| Type | Supported operators |
-|---|---|
+| Type                                | Supported operators                                 |
+|-------------------------------------|-----------------------------------------------------|
 | numeric / date / timestamp / string | `=`, `≠`, `<`, `≤`, `>`, `≥`, `is null`, `not null` |
-| boolean | `=`, `≠`, `is null`, `not null` |
-| binary, struct, list, map | not filterable |
+| boolean                             | `=`, `≠`, `is null`, `not null`                     |
+| binary, struct, list, map           | not filterable                                      |
 
 Not supported:
 - `starts with` / `CONTAINS` / `LIKE` / regex — `iceberg-go` v0.5.0 builds the per-record filter via Arrow's substrait evaluator, which has no scalar mapping for `starts_with`. We surface it as a filter error and hide the operator from the UI; revisit when an upstream release ships the mapping.
-- `IN` / `NOT IN`, OR-combining, filtering on nested fields, sorting — out of scope for M3.
+- `IN` / `NOT IN`, OR-combining, filtering on nested fields, sorting — deliberately out of scope, see [`DESIGN.md`](DESIGN.md).
 
 ### Pagination model
 
@@ -163,7 +163,7 @@ Each fetch is **scan-and-discard**: the server iterates the Arrow stream from ro
 
 ## Scope
 
-- **Catalog backends:** REST only (Polaris, Lakekeeper). Glue/Hive/SQL are deferred until after M4.
+- **Catalog backends:** REST only (Polaris, Lakekeeper). Glue/Hive/SQL are deferred.
 - **Auth:** static bearer token, or OAuth2 client credentials (token re-fetched reactively on 401). AWS SigV4 deferred.
 - **Delete files:** whatever `iceberg-go`'s `Scan()` returns. No custom positional/equality-delete handling.
 

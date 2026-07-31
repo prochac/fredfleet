@@ -7,13 +7,13 @@ Desktop app for browsing Apache Iceberg catalogs. Built with [Wails v2](https://
 
 ## Status
 
-Early scaffolding. The plan lives in [`PLAN.md`](PLAN.md) — four sequential milestones, each shippable on its own. When taking on a task, locate it in `PLAN.md` first; treat the validation criteria there as the definition of done.
+Feature-complete against the MVP scope; unreleased. [`DESIGN.md`](DESIGN.md) describes the system as it stands — subsystem by subsystem, with the reasoning behind each non-obvious choice — and its "Open items" section is the remaining work (all of it release actions or manual checks). Read the relevant section there before changing a subsystem; the decisions it records are the ones most likely to be undone by accident.
 
 ## Architecture intent
 
 - **Backend (Go):** owns all catalog I/O via `iceberg-go`. Exposes a small set of methods to the frontend through Wails bindings. Persists connection definitions to a local JSON file.
 - **Frontend (web):** browsing UI — connection manager, namespace tree, schema/partition/properties panels, row preview. Calls into Go via Wails bindings; never makes catalog requests directly.
-- **Connections:** REST catalogs only for the MVP (Polaris, Lakekeeper). The `Connection` struct carries a `catalog type` field so Glue/SQL/Hive can be added later without reshaping storage — but those backends are out of scope until after M4.
+- **Connections:** REST catalogs only for the MVP (Polaris, Lakekeeper). The `Connection` struct carries a `catalog type` field so Glue/SQL/Hive can be added later without reshaping storage — but those backends are out of scope for now.
 - **Auth:** Static bearer token, or OAuth2 client credentials via `iceberg-go` (`rest.WithCredential` + `rest.WithAuthURI` + optional `rest.WithScope`). No anonymous mode, no AWS SigV4.
 - **Delete files:** Rely on `iceberg-go`'s `Scan()` output as-is. Don't add custom positional or equality-delete handling; document gaps in the README instead.
 

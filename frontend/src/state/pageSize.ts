@@ -1,9 +1,9 @@
 // Page-size change semantics for the row preview, kept separate from
 // PreviewPanel so the rule can be tested without mounting a component.
 //
-// The rule (PLAN.md § M3e): if the new page size fits inside the rows already
-// loaded, re-paginate the buffer client-side. Otherwise the buffer can't fill
-// a page, so re-scan from skip=0 with the new limit.
+// The rule: if the new size fits inside the rows already loaded, re-paginate
+// the buffer client-side. Otherwise the buffer can't fill a page, so re-scan
+// from skip=0 with the new limit.
 
 export type PageSizePlan =
     /** Buffer already covers the new size — slice it, issue no request. */

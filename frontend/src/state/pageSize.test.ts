@@ -1,8 +1,9 @@
 import {describe, expect, it} from 'vitest';
 import {pageSizePlan} from './pageSize';
 
-// Discharges the frontend half of PLAN.md § M3e:
-//   "100 → 500 re-fetches at a 200-row buffer, 500 → 100 slices client-side."
+// The two cases that motivated splitting this rule out of PreviewPanel:
+// 100 → 500 must re-fetch at a 200-row buffer, 500 → 100 must slice
+// client-side without touching the network.
 
 describe('pageSizePlan', () => {
     it('re-fetches when growing past the buffer (100 → 500 at a 200-row buffer)', () => {

@@ -94,8 +94,8 @@ type PreviewColumnDTO struct {
 
 // PreviewRowsDTO is the row-preview payload. Rows are JSON-friendly: decimals
 // arrive as strings, timestamps as ISO-8601 strings, dates as YYYY-MM-DD,
-// bytes as base64. Null cells round-trip as JSON null. HasMore stays false
-// until M3e wires up Load-more pagination.
+// bytes as base64. Null cells round-trip as JSON null. HasMore comes from the
+// trailing probe row the scan reads past the requested limit.
 type PreviewRowsDTO struct {
 	Columns  []PreviewColumnDTO `json:"columns"`
 	Rows     []map[string]any   `json:"rows"`
