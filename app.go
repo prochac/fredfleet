@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/apache/iceberg-go/catalog/rest"
-	"github.com/apache/iceberg-go/table"
 
 	"github.com/prochac/fredfleet/internal/catalog"
 	"github.com/prochac/fredfleet/internal/connections"
@@ -63,8 +62,8 @@ func (a *App) ListConnections() ([]connections.Connection, error) {
 // either. Pass an empty string for any secret to keep the existing keyring
 // entry untouched (useful when editing).
 //
-//   secret    — bearer token or OAuth2 client_secret, depending on Auth.Kind.
-//   s3Secret  — optional S3 secret access key, only used when c.S3 is set.
+//	secret    — bearer token or OAuth2 client_secret, depending on Auth.Kind.
+//	s3Secret  — optional S3 secret access key, only used when c.S3 is set.
 func (a *App) SaveConnection(c connections.Connection, secret, s3Secret string) error {
 	if err := a.store.Save(c); err != nil {
 		wruntime.LogError(a.ctx, "save connection: "+err.Error())
@@ -133,7 +132,7 @@ func (a *App) ListNamespaces(connName string, parent []string) ([]catalog.Namesp
 	err := a.withCatalog(connName, "list namespaces", func(cat *rest.Catalog) error {
 		ctx, cancel := context.WithTimeout(a.ctx, listTimeout)
 		defer cancel()
-		idents, err := cat.ListNamespaces(ctx, table.Identifier(parent))
+		idents, err := cat.ListNamespaces(ctx, parent)
 		if err != nil {
 			return err
 		}
@@ -158,7 +157,7 @@ func (a *App) ListTables(connName string, namespace []string) ([]catalog.TableDT
 		ctx, cancel := context.WithTimeout(a.ctx, listTimeout)
 		defer cancel()
 		out = []catalog.TableDTO{}
-		for ident, iterErr := range cat.ListTables(ctx, table.Identifier(namespace)) {
+		for ident, iterErr := range cat.ListTables(ctx, namespace) {
 			if iterErr != nil {
 				return iterErr
 			}
@@ -179,7 +178,7 @@ func (a *App) LoadTable(connName string, namespace []string, name string) (*cata
 	err := a.withCatalog(connName, "load table", func(cat *rest.Catalog) error {
 		ctx, cancel := context.WithTimeout(a.ctx, loadTimeout)
 		defer cancel()
-		ident := append(table.Identifier(append([]string(nil), namespace...)), name)
+		ident := append(append([]string(nil), namespace...), name)
 		tbl, err := cat.LoadTable(ctx, ident)
 		if err != nil {
 			return err
@@ -194,7 +193,7 @@ func (a *App) LoadTable(connName string, namespace []string, name string) (*cata
 // PreviewTable scans the table and returns up to limit rows starting at
 // offset skip, as JSON-friendly values. limit ≤ 0 defaults to 100 rows;
 // negative skip is clamped to 0. reqID lets the frontend cancel an in-flight
-// scan via CancelPreview on unmount; pass "" to opt out. filters are
+// scan via CancelRequest on unmount; pass "" to opt out. filters are
 // AND-combined and pushed down to the iceberg-go scan; an empty list returns
 // the unfiltered preview. Pagination is scan-and-discard: every call rescans
 // from row 0 and drops the first skip rows, so cost is O(skip+limit) per call.
@@ -207,7 +206,7 @@ func (a *App) PreviewTable(reqID, connName string, namespace []string, name stri
 		defer release()
 		ctx, cancel := context.WithTimeout(reqCtx, previewTimeout)
 		defer cancel()
-		ident := append(table.Identifier(append([]string(nil), namespace...)), name)
+		ident := append(append([]string(nil), namespace...), name)
 		tbl, err := cat.LoadTable(ctx, ident)
 		if err != nil {
 			return err

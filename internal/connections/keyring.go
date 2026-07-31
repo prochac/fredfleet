@@ -44,6 +44,6 @@ func (Keyring) Delete(name string) error {
 
 // SetS3, GetS3, DeleteS3 manage the optional explicit S3 secret access key,
 // stored under "<name>:s3" so it never collides with the catalog auth secret.
-func (k Keyring) SetS3(name, secret string) error    { return k.Set(name+s3Suffix, secret) }
-func (k Keyring) GetS3(name string) (string, error)  { return k.Get(name + s3Suffix) }
-func (k Keyring) DeleteS3(name string) error         { return k.Delete(name + s3Suffix) }
+func (k Keyring) SetS3(name, secret string) error   { return k.Set(name+s3Suffix, secret) }
+func (k Keyring) GetS3(name string) (string, error) { return k.Get(name + s3Suffix) }
+func (k Keyring) DeleteS3(name string) error        { return k.Delete(name + s3Suffix) }

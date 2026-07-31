@@ -1,0 +1,30 @@
+version: "2"
+
+run:
+  # Same tag the Linux build uses; without it the wails cgo package resolves
+  # against webkit2gtk-4.0, which distros shipping only 4.1 do not have.
+  build-tags:
+    - webkit2_41
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - errorlint
+    - misspell
+    - nilerr
+    - unconvert
+    - usestdlibvars
+  exclusions:
+    presets:
+      - std-error-handling
+    rules:
+      # Test helpers close over *testing.T and fail there; unchecked cleanup
+      # returns in fixtures are noise.
+      - path: _test\.go
+        linters:
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt

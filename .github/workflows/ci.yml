@@ -1,0 +1,154 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  WAILS_VERSION: v2.13.0
+  NODE_VERSION: '20'
+  GOLANGCI_VERSION: v2.12.2
+
+jobs:
+  go:
+    name: Go — vet, lint, test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install webkit2gtk + GTK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev pkg-config
+
+      # main.go carries //go:embed all:frontend/dist, and frontend/dist is
+      # gitignored — without a placeholder the package does not compile, and
+      # every Go tool below fails before it looks at any real code.
+      - name: Stub embedded frontend assets
+        run: |
+          mkdir -p frontend/dist
+          echo '<!doctype html><title>stub</title>' > frontend/dist/index.html
+
+      - name: go mod tidy is clean
+        run: go mod tidy -diff
+
+      - name: go vet
+        run: go vet -tags webkit2_41 ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: ${{ env.GOLANGCI_VERSION }}
+
+      - name: go test -race
+        run: go test -race -tags webkit2_41 ./...
+
+  frontend:
+    name: Frontend — typecheck, test, build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install webkit2gtk + GTK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev pkg-config
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+
+      # Binding generation compiles package main, which embeds frontend/dist —
+      # a directory vite has not written yet on a fresh checkout.
+      - name: Stub embedded frontend assets
+        run: |
+          mkdir -p frontend/dist
+          echo '<!doctype html><title>stub</title>' > frontend/dist/index.html
+
+      # frontend/wailsjs is generated and gitignored; the TS sources import from
+      # it, so tsc cannot run until the bindings exist.
+      - name: Generate Wails bindings
+        run: wails generate module -tags webkit2_41
+
+      - run: npm ci
+        working-directory: frontend
+
+      - name: Test
+        run: npm test
+        working-directory: frontend
+
+      # `npm run build` is `tsc && vite build` — the same command wails build
+      # shells out to, so a type error fails here rather than at release time.
+      - name: Typecheck and build
+        run: npm run build
+        working-directory: frontend
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: [go, frontend]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux/amd64
+            os: ubuntu-24.04
+            platform: linux/amd64
+            tags: '-tags webkit2_41'
+          - name: darwin/universal
+            os: macos-14
+            platform: darwin/universal
+            tags: ''
+          - name: windows/amd64
+            os: windows-2022
+            platform: windows/amd64
+            tags: ''
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install webkit2gtk + GTK
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev pkg-config
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+
+      - name: Build
+        run: wails build ${{ matrix.tags }} -platform ${{ matrix.platform }} -clean -trimpath

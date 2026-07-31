@@ -1,0 +1,42 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      go-minor-patch:
+        update-types: [minor, patch]
+    ignore:
+      # iceberg-go and wails carry the constraints DESIGN.md documents; both
+      # need a human to re-read the gotchas before moving, and wails/v2 must
+      # move together with WAILS_VERSION in the workflows.
+      - dependency-name: github.com/apache/iceberg-go
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: github.com/wailsapp/wails/v2
+        update-types: [version-update:semver-major, version-update:semver-minor]
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+    ignore:
+      # Both are pinned on purpose: TypeScript is held at 4.6, and @types/node
+      # above v18 ships .d.ts files that 4.6 cannot parse (TS1005/TS1139),
+      # which breaks `npm run build` and therefore every wails build. They
+      # unpin together or not at all — see CLAUDE.md.
+      - dependency-name: typescript
+      - dependency-name: '@types/node'
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']

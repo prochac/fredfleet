@@ -9,5 +9,12 @@
   "author": {
     "name": "Tomáš Procházka",
     "email": "tomas.prochazka5d@gmail.com"
+  },
+  "info": {
+    "companyName": "prochac",
+    "productName": "fredfleet",
+    "productVersion": "0.0.0",
+    "copyright": "Copyright © 2026 Tomáš Procházka. Apache-2.0 licensed.",
+    "comments": "Desktop browser for Apache Iceberg catalogs"
   }
 }

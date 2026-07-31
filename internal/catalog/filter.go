@@ -44,7 +44,7 @@ func BuildRowFilter(schema *iceberg.Schema, filters []PreviewFilterDTO) (iceberg
 	// Wails/WebKit, where the WebKit-installed SIGSEGV handler is not
 	// SA_ONSTACK-safe and Go cannot route the panic through its signal stack.
 	if _, err := iceberg.BindExpr(schema, expr, true); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrFilter, err)
+		return nil, fmt.Errorf("%w: %w", ErrFilter, err)
 	}
 	return expr, nil
 }
@@ -285,7 +285,7 @@ func coerceDecimal(v any, precision, scale int) (iceberg.Decimal, error) {
 	}
 	d, err := decimal128.FromString(s, int32(precision), int32(scale))
 	if err != nil {
-		return iceberg.Decimal{}, fmt.Errorf("%w: invalid decimal %q: %s", ErrFilter, s, err)
+		return iceberg.Decimal{}, fmt.Errorf("%w: invalid decimal %q: %w", ErrFilter, s, err)
 	}
 	return iceberg.Decimal{Val: d, Scale: scale}, nil
 }

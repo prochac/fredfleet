@@ -111,8 +111,8 @@ func newFixtureTable(t *testing.T, nrows, batchRows int, tagFor func(i int) stri
 			names.Append(fmt.Sprintf("row-%d", i))
 			tags.Append(tagFor(i))
 		}
-		rec := rb.NewRecord()
-		at := array.NewTableFromRecords(arrSchema, []arrow.Record{rec})
+		rec := rb.NewRecordBatch()
+		at := array.NewTableFromRecords(arrSchema, []arrow.RecordBatch{rec})
 
 		tbl, err = tbl.AppendTable(ctx, at, int64(end-start), nil)
 

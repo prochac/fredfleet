@@ -85,8 +85,8 @@ func buildDesktopEntry(exe, iconPath string) string {
 }
 
 // quoteExec follows the Desktop Entry spec quoting rules: only quote if
-// the path contains whitespace; inside quotes, escape `"`, `` ` ``, `$`,
-// and `\` with a backslash.
+// the path contains whitespace; inside quotes, escape the double quote,
+// backtick, dollar and backslash characters with a backslash.
 func quoteExec(s string) string {
 	if !strings.ContainsAny(s, " \t\n") {
 		return s
