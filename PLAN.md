@@ -40,7 +40,7 @@ Four sequential milestones. Each is a shippable checkpoint:
 
 ### Validation criteria
 - ✅ App launches on Linux (Arch, webkit2gtk-4.1). macOS / Windows not yet smoke-tested.
-- ⏳ Can add a connection pointing at a real REST catalog — in progress against Lakekeeper + Keycloak (warehouse field landing, awaiting user confirmation).
+- ✅ Can add a connection pointing at a real REST catalog — Lakekeeper + Keycloak, confirmed by every subsequent live check in M2/M3.
 - ✅ Connection persists after app restart (atomic write + read on launch).
 - ✅ Wrong URL or bad auth shows a clear error message — `MapError` covers auth, forbidden, timeouts, DNS, ECONNREFUSED.
 - ⏳ Dark mode toggles correctly when OS preference changes — implementation in `theme.ts` via `matchMedia` listener; needs visual confirmation by toggling the system setting with the app open.
@@ -210,12 +210,12 @@ M3b ─┘
 ## Milestone 4 — Polish + release *(mvp)*
 
 ### Tasks
-- Keyboard navigation: arrow keys in tree, Tab between panels, Escape to close dialogs *(basics landed)*
+- ✅ **Keyboard navigation** (`355add2`) — roving-tabIndex arrow nav in the tree (Up/Down/Left/Right, Home/End, Enter/Space, focus state in `treeStore`), arrow-cycling metadata tab bar, shared `Modal` wrapper with Escape dismiss + focus trap + focus restore (`useEscapeKey`, `useFocusTrap`), `:focus-visible` rings in both themes, and `?` help discoverability.
 - ✅ **Cross-platform keyboard shortcuts** — shipped, including a `Mod+K` command palette that searches the whole catalog. See the two follow-ups below.
-- Error toasts for transient errors (network blip, credential expiry) without losing UI state
-- App icon, window title reflects active connection name
-- Build and package for macOS (arm64 + amd64) and Linux
-- README with quickstart: install, configure a connection, run
+- ✅ **Error toasts** (`de81af1`) — `sonner` toasts for refetch/save/load-more failures; first load stays inline via `<Pending>` so a failed initial fetch doesn't leave an empty panel plus a toast.
+- ✅ **App icon + dynamic window title** (`de81af1`) — `WindowSetTitle` and `document.title` follow the active connection; `internal/desktopentry/` self-installs `~/.local/share/applications/fredfleet.desktop` on Linux first launch (idempotent, skipped in packaged contexts), fixing Wayland window-icon resolution via `StartupWMClass`.
+- ⏳ **Build and package for macOS + Linux** — `.github/workflows/release.yml` builds linux/amd64, darwin/universal and windows/amd64 and drafts a release on a `v*` tag (`de81af1`). **Never executed — no tag has been cut**, so the macOS/Windows legs, artifact naming and the release step are all unverified.
+- ✅ **README quickstart** (`de81af1`) — install per platform, bearer and OAuth2 connection walkthroughs, storage locations, shortcut table, filter/pagination semantics, build-from-source.
 
 ### Follow-up: richer keyboard shortcuts (cross-platform) — **shipped**
 
@@ -270,7 +270,16 @@ The palette used to index only already-expanded namespaces, because the tree loa
 - Persisting search state across palette opens — the backend cache already makes a reopen instant.
 
 ### Validation criteria
-- Full tree → schema → preview flow works with keyboard only
-- Network error during row preview shows a toast and keeps the schema panel intact
-- Packaged binary runs on a clean machine without any Go toolchain installed
-- README quickstart works for someone who has never used the app
+- ⏳ Full tree → schema → preview flow works with keyboard only — implemented, never walked end to end.
+- ⏳ Network error during row preview shows a toast and keeps the schema panel intact — toast path wired for refetch/load-more; not exercised against a killed catalog.
+- ⏳ Packaged binary runs on a clean machine without any Go toolchain installed — blocked on cutting the first tag.
+- ⏳ README quickstart works for someone who has never used the app — not walked through literally.
+
+### Carried-over validation debt (from M1 / M3)
+
+These were left ⏳ in their own milestones and are still open; M4 is the natural place to clear them.
+
+- ⏳ **M1** — dark mode toggles correctly when the OS preference changes (flip the system setting with the app open).
+- ⏳ **M3d** — whole-table filter proof: match a value that only exists past row 100.
+- ⏳ **M3c** — `runtime.NumGoroutine()` back to baseline within 5 s after cancelling a slow scan.
+- ⏳ **M3e** — no duplicate rows on Load more; 100 → 500 re-fetches with a 200-row buffer, 500 → 100 slices client-side.
