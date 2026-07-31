@@ -31,6 +31,13 @@ func NewRegistry() *Registry {
 
 // Get returns a cached catalog if the args fingerprint matches the cached
 // entry, otherwise builds a new one and caches it.
+//
+// ctx is retained for the lifetime of the cached catalog: since iceberg-go
+// v0.6.0 the OAuth2 manager wraps a clientcredentials token source built with
+// this exact context, and every later token refresh runs on it. Pass an
+// app-lifetime context, never a request-scoped one — a cancelled ctx would
+// make refreshes fail with "context canceled" long after the request that
+// created the entry is gone.
 func (r *Registry) Get(ctx context.Context, name string, args Args) (*rest.Catalog, error) {
 	fp := fingerprint(args)
 	r.mu.Lock()
@@ -62,12 +69,13 @@ func (r *Registry) Invalidate(name string) {
 // Do runs fn against a connected catalog. If fn returns an auth-expired
 // error, the cached catalog is dropped, rebuilt, and fn is retried once.
 //
-// Workaround for an iceberg-go v0.5.0 bug: Oauth2AuthManager fetches a token
-// once on first use and caches it on the struct forever — expires_in is
-// decoded but ignored, refresh_token is never used, and there is no 401
-// re-auth path. Fixed upstream in apache/iceberg-go@6842055
-// ("feat(catalog): refresh oauth tokens", PR #793) but not yet in any tagged
-// release. Rebuilding the *rest.Catalog forces a fresh token fetch.
+// Expiry-driven refresh is no longer our problem: iceberg-go v0.6.0 replaced
+// the forever-cached token of v0.5.0 with an oauth2 clientcredentials token
+// source, which refreshes on expiry by itself. The retry stays for the cases
+// that a token source cannot see — a token revoked or invalidated server-side
+// before its stated expiry, or credentials rotated at the IdP. There the
+// cached source keeps handing out a token it still believes is valid, and only
+// rebuilding the *rest.Catalog forces a fresh fetch.
 //
 // For static bearer auth this still issues the (futile) retry once, then
 // surfaces the same error — harmless.

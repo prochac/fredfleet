@@ -73,13 +73,13 @@ func specToDTO(s iceberg.PartitionSpec) PartitionSpecDTO {
 		SpecID: s.ID(),
 		Fields: []PartitionFieldDTO{},
 	}
-	for f := range s.Fields() {
+	for _, f := range s.Fields() {
 		transform := ""
 		if f.Transform != nil {
 			transform = f.Transform.String()
 		}
 		out.Fields = append(out.Fields, PartitionFieldDTO{
-			SourceID:  f.SourceID,
+			SourceID:  f.SourceID(),
 			FieldID:   f.FieldID,
 			Name:      f.Name,
 			Transform: transform,

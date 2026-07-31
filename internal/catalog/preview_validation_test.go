@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/apache/iceberg-go"
 	icebergio "github.com/apache/iceberg-go/io"
 	"github.com/apache/iceberg-go/table"
 )
@@ -337,4 +339,61 @@ func settle(t *testing.T) {
 		runtime.Gosched()
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// --- upstream starts_with gap ---------------------------------------------
+
+// TestStartsWithStillUnsupportedUpstream pins the reason `starts` is rejected
+// in BuildRowFilter. filter_test.go proves we reject it; this proves we are
+// still right to. It goes around BuildRowFilter deliberately, handing
+// iceberg.StartsWith straight to a real scan, so the assertion is about
+// upstream behaviour rather than about our own guard.
+//
+// The failure surfaces during iteration, not at ToArrowRecords: planning
+// succeeds and Arrow's substrait evaluator only gives up once it has to
+// evaluate the expression against a record batch.
+//
+// When this test starts failing because the scan *succeeded*, arrow-go has
+// shipped the scalar mapping — drop the `starts` rejection in filter.go, its
+// test in filter_test.go, and unhide the operator in the UI.
+func TestStartsWithStillUnsupportedUpstream(t *testing.T) {
+	const rows = 20
+	tbl := newFixtureTable(t, rows, rows, func(i int) string {
+		if i%2 == 0 {
+			return "alpha-x"
+		}
+		return "beta-y"
+	})
+
+	scan := tbl.Scan(
+		table.WithLimit(rows),
+		table.WithRowFilter(iceberg.StartsWith(iceberg.Reference("tag"), "alph")),
+	)
+	_, itr, err := scan.ToArrowRecords(t.Context())
+	if err != nil {
+		// A plan-time failure is still an upstream gap, just a different one;
+		// the guard's job is to notice either way.
+		if strings.Contains(err.Error(), "starts_with") {
+			return
+		}
+		t.Fatalf("scan planning failed for an unrelated reason: %v", err)
+	}
+
+	matched := 0
+	for batch, ierr := range itr {
+		if ierr != nil {
+			if batch != nil {
+				batch.Release()
+			}
+			if strings.Contains(ierr.Error(), "starts_with") {
+				return
+			}
+			t.Fatalf("scan failed for an unrelated reason: %v", ierr)
+		}
+		matched += int(batch.NumRows())
+		batch.Release()
+	}
+	t.Fatalf("starts_with scan succeeded and returned %d rows: arrow-go now "+
+		"implements the mapping, so the `starts` rejection in filter.go is "+
+		"obsolete", matched)
 }

@@ -115,10 +115,12 @@ secret. A changed URL, warehouse, auth mode or rotated secret therefore
 invalidates itself with no explicit bookkeeping; `SaveConnection` and
 `DeleteConnection` invalidate explicitly on top of that.
 
-`Registry.Do` also carries the OAuth workaround: on `rest.ErrUnauthorized` or
+`Registry.Do` also carries a reactive auth retry: on `rest.ErrUnauthorized` or
 `rest.ErrAuthorizationExpired` it drops the cached catalog and retries the
-operation exactly once, which forces a fresh token fetch. See
-[iceberg-go constraints](#constraints-imposed-by-iceberg-go-v050).
+operation exactly once, which forces a fresh token fetch. Expiry-driven refresh
+is `iceberg-go`'s job since v0.6.0; the retry now covers revoked or rotated
+credentials, which no token source can anticipate. See
+[iceberg-go constraints](#constraints-imposed-by-iceberg-go-v060).
 
 #### DTOs
 
@@ -369,7 +371,7 @@ included.
 
 ---
 
-## Constraints imposed by `iceberg-go` v0.5.0
+## Constraints imposed by `iceberg-go` v0.6.0
 
 These shape the design more than any internal decision does. All of them are
 upstream; none is worked around by forking, because this project deliberately
@@ -379,33 +381,60 @@ does not maintain an `iceberg-go` fork.
   substrait evaluator, which has no scalar mapping for `starts_with`; the scan
   dies with `not implemented: starts_with` inside `arrow_scanner.go`. The
   operator was cut from the UI and is rejected at the boundary with a message
-  naming the upstream gap. No LIKE, CONTAINS or regex either.
+  naming the upstream gap. No LIKE, CONTAINS or regex either. The gap is on
+  Arrow's side, not `iceberg-go`'s — `table/substrait` emits the `starts_with`
+  extension reference fine, and always did; nothing consumes it. Re-verified
+  against v0.6.0 by `TestStartsWithStillUnsupportedUpstream`, which scans a
+  string column with a real `iceberg.StartsWith` filter and asserts the
+  failure, so the day `arrow-go` implements the mapping the test fails and
+  tells us to delete the rejection.
 - **No `OFFSET`** — hence scan-and-discard pagination.
-- **OAuth2 tokens are cached forever.** `Oauth2AuthManager` fetches once and
-  keeps the token on the struct; `expires_in` is decoded and ignored, refresh
-  tokens are never used, and there is no 401 re-auth path. Every cached
-  `*rest.Catalog` would keep sending a stale bearer until restart. Worked around
-  reactively in `Registry.Do`. Fixed upstream in `apache/iceberg-go@6842055`
-  (PR #793) but not in any tagged release; the workaround goes when a release
-  ships it.
 - **The scanner re-binds `rowFilter` unconditionally** and panics on an
   already-bound predicate — hence the unbound expression from `BuildRowFilter`,
   and the `recover()` in `BuildPreviewRows`.
-- **A data race in the scan planner.** `Scan.collectManifestEntries` hands the
-  *same* cached partition evaluator to every errgroup worker, and
-  `exprEvaluator.Eval` writes to it before visiting. Benign for unpartitioned
-  tables (the expression is `AlwaysTrue` and the field is never read); a real
-  correctness bug for partitioned ones, where workers can read another
-  goroutine's partition record and prune the wrong data files. Not fixable from
-  app code — we do not control the fan-out. Keep `-race` off the default test
-  command or expect this one report.
-- **Dependency pinning is not optional.** `go mod tidy` resolves `arrow-go` up
-  to v18.7.0, which wants `substrait-protobuf/go` v0.85.0 — but `iceberg-go`
-  v0.5.0 pulls `substrait-go/v7` v7.4.0, which only compiles against v0.81.0.
-  MVS picks the newer one and the whole module stops building. `arrow-go` stays
-  at `v18.5.2-0.20260220015023-a886a5722b87` and `substrait-protobuf/go` at
-  `v0.81.0` until `iceberg-go` moves to `substrait-go/v8`. Don't run
-  `go mod tidy` casually.
+- **`PartitionField.SourceID()` collapses multi-argument transforms.** v0.6.0
+  changed `SourceID` from a field to a method over a new `SourceIDs []int`
+  slice, so transforms can take several source columns. `PartitionFieldDTO`
+  carries the single id that `SourceID()` returns, which is the first element.
+  Correct for every transform the Iceberg spec defines today (all take exactly
+  one source column); a multi-argument transform would render incompletely.
+  Widening the DTO is a frontend change too, so it waits until such a transform
+  actually exists.
+
+### Resolved upstream in v0.6.0
+
+Three constraints that shaped earlier decisions are gone. Recorded here because
+the code they justified is still in place, in reduced form, and would otherwise
+look unmotivated.
+
+- **OAuth2 token refresh.** v0.5.0's `Oauth2AuthManager` fetched a token once
+  and kept it on the struct forever — `expires_in` decoded and ignored, refresh
+  tokens unused, no 401 re-auth path — so a cached `*rest.Catalog` kept sending
+  a stale bearer until restart. v0.6.0 wraps an `oauth2.TokenSource` built from
+  `clientcredentials.Config`, which handles expiry and refresh itself. The
+  reactive retry in `Registry.Do` stays, but it now covers only what a token
+  source cannot see: a token revoked server-side or credentials rotated at the
+  IdP before the stated expiry, where the cached source keeps vending a token it
+  still believes is good. **New invariant:** the context passed to
+  `Registry.Get` is captured by that token source and used for every later
+  refresh, so it must be app-lifetime — a request-scoped context would make
+  refreshes fail with `context canceled` long after the request ended.
+  `App.withCatalog` passes `a.ctx`, which is correct.
+- **The data race in the scan planner.** `Scan.collectManifestEntries` handed
+  the *same* cached partition evaluator to every errgroup worker, and
+  `exprEvaluator.Eval` wrote `e.st` on it before visiting — benign for
+  unpartitioned tables, a pruning-correctness bug for partitioned ones. v0.6.0's
+  `Eval` copies the evaluator per call. `go test -race ./...` is clean; the
+  carve-out that kept `-race` off the default test command is gone.
+- **Dependency pinning around substrait.** v0.5.0 pulled `substrait-go/v7`,
+  which only compiled against `substrait-protobuf` v0.81.0, while `arrow-go`
+  v18.7.0 wanted v0.85.0 — MVS picked the newer one and the module stopped
+  building, so `arrow-go` and `substrait-protobuf` were pinned by hand and
+  `go mod tidy` was off-limits. v0.6.0 moved to `substrait-go/v8` v8.1.1 on
+  `substrait-protobuf` v0.85.0, `arrow-go` is unpinned at v18.7.0, and
+  `go mod tidy -diff` is clean. The general rule that deps track tagged
+  releases rather than pseudo-versions still stands; this specific conflict
+  does not.
 
 ---
 
@@ -422,9 +451,11 @@ via an in-memory `table.CatalogIO` and runs assertions through
 are end-to-end proofs of the scan path, not mock-level ones.
 
 It deliberately avoids iceberg-go's SQL catalog: importing `catalog/sql` drags
-in `bun` + `modernc.org/sqlite`, and the `go mod tidy` that follows breaks the
-build (above). `table.CatalogIO` is a two-method interface, so an in-memory
-implementation costs zero new dependencies.
+in `bun` + `modernc.org/sqlite` — originally fatal, because the `go mod tidy`
+that followed tripped the substrait conflict; now merely a cgo-adjacent
+dependency tree pulled into a shipped binary to serve a test. `table.CatalogIO`
+is a two-method interface, so an in-memory implementation costs zero new
+dependencies.
 
 What the executable proofs cover:
 
@@ -436,6 +467,7 @@ What the executable proofs cover:
 | `TestLoadMoreProducesNoDuplicates`         | The exact `skip = len(loaded)` sequence the frontend issues tiles 0..299 with no repeat and no gap                                                                                                                                                         |
 | `TestPaginationUnderFilterHasNoDuplicates` | The same under an active filter (every third row matches)                                                                                                                                                                                                  |
 | `TestHasMoreAtExactPageBoundary`           | The trailing-probe rule: a 200-row table must not offer a Load-more that returns zero rows                                                                                                                                                                 |
+| `TestStartsWithStillUnsupportedUpstream`   | The `starts` rejection is still warranted: a real `iceberg.StartsWith` scan against a string column still dies with `not implemented: starts_with`. Fails loudly if `arrow-go` ever ships the mapping                                                       |
 | `preview_test.go`, `filter_test.go`        | Type coercions and filter translation                                                                                                                                                                                                                      |
 | `search_test.go`                           | Crawl, cache and matcher behaviour                                                                                                                                                                                                                         |
 | `frontend/src/state/pageSize.test.ts`      | 100 → 500 re-fetches at a 200-row buffer; 500 → 100 slices client-side; plus the boundary, no-op and cold-buffer cases                                                                                                                                     |
@@ -454,8 +486,14 @@ Releases are **unsigned**: macOS needs the quarantine attribute removed, Windows
 shows a SmartScreen warning. Documented in the README rather than solved; code
 signing needs certificates this project does not have.
 
-Linux builds pass `-tags webkit2_41`. Wails 2.12 defaults to the webkit2gtk-4.0
-ABI, and distros that ship only 4.1 report "libwebkit Not Found" without it.
+Linux builds pass `-tags webkit2_41`. Wails still defaults to the webkit2gtk-4.0
+ABI as of 2.13, and distros that ship only 4.1 report "libwebkit Not Found"
+without it.
+
+`WAILS_VERSION` in the workflow pins the CLI that generates bindings and drives
+the build; `go.mod` pins the library it links against. They are separate knobs
+and must be bumped together — a mismatch produces bindings from one version
+against a runtime from another.
 
 ---
 
@@ -479,6 +517,11 @@ only a human can perform.
   intact. The toast path is wired for refetch and Load-more but has not been
   exercised against a catalog killed mid-scan.
 - ⏳ **README quickstart** read literally by someone who has never used the app.
+- ⏳ **OAuth2 refresh against a live catalog.** The refresh path moved from our
+  `Registry.Do` retry into `iceberg-go`'s token source in v0.6.0, and no test
+  here covers it — the fixture uses no catalog server. Connect to a catalog
+  issuing short-lived tokens, leave the app idle past expiry, and confirm the
+  next click works without a restart.
 
 Also unverified: the app has only ever been launched on Linux (Arch,
 webkit2gtk-4.1). macOS and Windows are built but never smoke-tested.

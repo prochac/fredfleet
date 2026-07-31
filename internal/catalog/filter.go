@@ -64,13 +64,16 @@ func buildOne(schema *iceberg.Schema, f PreviewFilterDTO) (iceberg.BooleanExpres
 	case "notnull":
 		return iceberg.NotNull(ref), nil
 	case "starts":
-		// iceberg-go v0.5.0 builds the per-record filter via Arrow's
-		// substrait expression evaluator, which has no scalar mapping for
+		// iceberg-go builds the per-record filter via Arrow's substrait
+		// expression evaluator, which has no scalar mapping for
 		// `starts_with`. The scan would fail with "not implemented:
-		// starts_with" deep inside arrow_scanner.go. Reject up front with a
-		// clear message; revisit when iceberg-go (or arrow-go's exprs
-		// extension set) ships a starts_with implementation.
-		return nil, fmt.Errorf("%w: operator %q is not supported by iceberg-go v0.5.0", ErrFilter, f.Op)
+		// starts_with" deep inside arrow_scanner.go. Still true on v0.6.0 —
+		// verified by scanning a string column with iceberg.StartsWith
+		// against the local fixture. The gap is in Arrow's evaluator, not in
+		// iceberg-go's substrait mapping (table/substrait emits starts_with
+		// fine), so revisit when arrow-go's exprs extension set implements
+		// it.
+		return nil, fmt.Errorf("%w: operator %q is not supported by iceberg-go v0.6.0", ErrFilter, f.Op)
 	case "eq", "neq", "lt", "lte", "gt", "gte":
 		return buildOrdered(nf.Type, f, ref)
 	default:

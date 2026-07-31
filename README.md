@@ -150,7 +150,7 @@ Filters are pushed down to the iceberg-go scan (server-side). Multiple filters a
 | binary, struct, list, map           | not filterable                                      |
 
 Not supported:
-- `starts with` / `CONTAINS` / `LIKE` / regex — `iceberg-go` v0.5.0 builds the per-record filter via Arrow's substrait evaluator, which has no scalar mapping for `starts_with`. We surface it as a filter error and hide the operator from the UI; revisit when an upstream release ships the mapping.
+- `starts with` / `CONTAINS` / `LIKE` / regex — `iceberg-go` builds the per-record filter via Arrow's substrait evaluator, which has no scalar mapping for `starts_with` (still true on v0.6.0). We surface it as a filter error and hide the operator from the UI; revisit when `arrow-go` ships the mapping.
 - `IN` / `NOT IN`, OR-combining, filtering on nested fields, sorting — deliberately out of scope, see [`DESIGN.md`](DESIGN.md).
 
 ### Pagination model
@@ -173,7 +173,7 @@ Each fetch is **scan-and-discard**: the server iterates the Arrow stream from ro
 
 - Go 1.26+ (matches `go.mod`)
 - Node.js 20+ / npm
-- [Wails CLI v2.12.0](https://wails.io/docs/gettingstarted/installation): `go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0`
+- [Wails CLI v2.13.0](https://wails.io/docs/gettingstarted/installation): `go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0`
 - Platform deps for Wails (run `wails doctor` to check):
   - **Linux**: WebKit2GTK 4.1, GTK 3, libgcc, pkg-config — on Arch: `sudo pacman -S webkit2gtk-4.1 gtk3`; on Debian/Ubuntu 24.04+: `sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev pkg-config`
   - **macOS**: Xcode command-line tools
@@ -190,7 +190,7 @@ wails dev      # hot-reload Go + Vite, opens devtools
 wails build    # production binary in build/bin/
 ```
 
-**On Linux (Arch and other distros that ship webkit2gtk-4.1):** add `-tags webkit2_41`. Wails 2.12 defaults to the older 4.0 ABI.
+**On Linux (Arch and other distros that ship webkit2gtk-4.1):** add `-tags webkit2_41`. Wails 2.13 still defaults to the older 4.0 ABI.
 
 ```bash
 wails dev   -tags webkit2_41
