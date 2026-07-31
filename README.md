@@ -107,10 +107,17 @@ Notes:
 
 - `Mod+F` deliberately shadows the webview's find-in-page — the filter bar is
   this app's find.
-- The command palette searches **loaded** tables only. The tree fetches children
-  lazily, so a namespace you have never expanded is not indexed; the palette
-  footer says how many tables it currently covers. Table search is
+- The command palette searches the **whole catalog**, not just what the sidebar
+  tree has loaded. Typing a table name starts a background crawl of every
+  namespace; the result is cached for five minutes per connection, so the first
+  query on a large catalog takes a moment and later ones are instant.
+  `Mod+Shift+R` drops that cache along with the tree. Opening the palette without
+  typing — or prefixing the query with `>` for commands — never triggers a crawl.
+  The footer states what the results cover, including when a crawl came back
+  partial because of permissions or a size cap. Table search is
   diacritic-insensitive, so `zakaznici` finds `zákazníci`.
+- Jumping to a table from a namespace you never expanded opens it in the main
+  panel; the sidebar tree is left as it was.
 - Digit chords match the physical key, so `Mod+1` works on layouts whose number
   row needs `Shift` for digits (Czech, AZERTY).
 - Window and clipboard shortcuts (`Mod+W`, `Mod+Q`, `Mod+C`/`V`/`X`/`A`) are

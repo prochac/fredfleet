@@ -207,6 +207,7 @@ export default function App() {
 
                     {paletteOpen && (
                         <CommandPalette
+                            connName={selectedConnection}
                             onClose={() => setPaletteOpen(false)}
                             onOpenTable={setSelectedTable}
                         />

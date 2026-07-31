@@ -1,4 +1,5 @@
 import {KeyboardEvent, useEffect, useMemo, useRef} from 'react';
+import {RefreshTableIndex} from '../../wailsjs/go/main/App';
 import {
     flattenVisible,
     keyOfNamespace,
@@ -144,17 +145,7 @@ export function NamespaceTree({connName, selectedTable, onSelectTable}: Props) {
                 })),
         [state.byKey],
     );
-    const indexComplete = useMemo(
-        () =>
-            state.root.status === 'loaded' &&
-            Object.values(state.byKey).every(
-                (n) =>
-                    n.kind === 'table' ||
-                    (n.namespacesStatus === 'loaded' && n.tablesStatus === 'loaded'),
-            ),
-        [state.root.status, state.byKey],
-    );
-    usePublishTableIndex(indexedTables, indexComplete);
+    usePublishTableIndex(indexedTables);
 
     // Lowest tier: only reached when no table is open, since the metadata and
     // preview panels register the same command at PRIORITY.TABLE.
@@ -168,7 +159,13 @@ export function NamespaceTree({connName, selectedTable, onSelectTable}: Props) {
         true,
         PRIORITY.TREE,
     );
-    useCommand('refresh.treeRoot', () => refreshRoot());
+    // "Forget what you know about this catalog": the tree drops its loaded
+    // children, and the backend drops the cached table index the command
+    // palette searches, so the next palette query re-crawls.
+    useCommand('refresh.treeRoot', () => {
+        refreshRoot();
+        if (connName) RefreshTableIndex(connName).catch(() => {});
+    });
 
     if (!connName) {
         return <p className="tree-empty">Pick a connection to start browsing.</p>;

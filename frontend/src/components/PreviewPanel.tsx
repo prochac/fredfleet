@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 import {
     type ColumnDef,
     flexRender,
@@ -8,6 +8,7 @@ import {
 } from '@tanstack/react-table';
 import {CancelRequest, PreviewTable} from '../../wailsjs/go/main/App';
 import {catalog} from '../../wailsjs/go/models';
+import {useDebounced} from '../hooks/useDebounced';
 import {PRIORITY, useCommand, useRunCommand} from '../shortcuts/registry';
 import {errorMessage, toastError} from '../toast';
 import {Pending} from './Pending';
@@ -48,21 +49,6 @@ function placeholderFor(typeText: string): string {
     if (typeText === 'timestamp' || typeText === 'timestamptz') return 'YYYY-MM-DDTHH:MM:SS';
     if (typeText === 'boolean') return 'true / false';
     return 'value';
-}
-
-/** Returns the debounced value plus a flush that adopts the latest one now. */
-function useDebounced<T>(value: T, ms: number): [T, () => void] {
-    const [v, setV] = useState(value);
-    const latest = useRef(value);
-    latest.current = value;
-    useEffect(() => {
-        const id = setTimeout(() => setV(value), ms);
-        return () => clearTimeout(id);
-    }, [value, ms]);
-    // The pending timeout still fires afterwards, but it sets the same value,
-    // so React bails out of the re-render.
-    const flush = useCallback(() => setV(latest.current), []);
-    return [v, flush];
 }
 
 function isEffective(f: FilterEntry): boolean {

@@ -4,10 +4,12 @@ import {fuzzyMatch} from '../shortcuts/fuzzy';
 import {formatShortcut} from '../shortcuts/keys';
 import {useIsCommandLive, useRunCommand} from '../shortcuts/registry';
 import {useTableIndex, type TableTarget} from '../state/tableIndex';
+import {useTableSearch, type TableSearch} from '../state/tableSearch';
 import type {TreePath} from '../state/treeStore';
 import {Modal} from './Modal';
 
 type Props = {
+    connName: string | null;
     onClose: () => void;
     onOpenTable: (t: {namespace: TreePath; name: string}) => void;
 };
@@ -19,16 +21,26 @@ type Item =
 const MAX_RESULTS = 50;
 const COMMAND_PREFIX = '>';
 
-export function CommandPalette({onClose, onOpenTable}: Props) {
+export function CommandPalette({connName, onClose, onOpenTable}: Props) {
     const [query, setQuery] = useState('');
     const [active, setActive] = useState(0);
     const runCommand = useRunCommand();
     const isLive = useIsCommandLive();
-    const {tables, complete} = useTableIndex();
+    const {tables: treeTables} = useTableIndex();
     const listRef = useRef<HTMLUListElement>(null);
 
     const commandsOnly = query.startsWith(COMMAND_PREFIX);
     const term = commandsOnly ? query.slice(COMMAND_PREFIX.length).trim() : query.trim();
+
+    // Typing a table name searches the whole catalog; the tree index is what we
+    // can answer from instantly while that comes back.
+    const search = useTableSearch(connName, term, !commandsOnly);
+
+    const tables = useMemo<TableTarget[]>(() => {
+        if (search.tables.length === 0) return treeTables;
+        const seen = new Set(treeTables.map((t) => t.label));
+        return [...treeTables, ...search.tables.filter((t) => !seen.has(t.label))];
+    }, [treeTables, search.tables]);
 
     const items = useMemo<Item[]>(() => {
         const out: Item[] = [];
@@ -93,6 +105,7 @@ export function CommandPalette({onClose, onOpenTable}: Props) {
     }
 
     const activeId = items[active] ? `palette-opt-${items[active].key}` : undefined;
+    const shownTables = items.reduce((n, i) => (i.kind === 'table' ? n + 1 : n), 0);
 
     return (
         <Modal
@@ -162,19 +175,51 @@ export function CommandPalette({onClose, onOpenTable}: Props) {
                 <p className="palette-empty">
                     {commandsOnly
                         ? `No command matches “${term}”.`
-                        : `No loaded table or command matches “${term}”.`}
+                        : search.status === 'searching'
+                          ? `Still indexing the catalog — nothing matches “${term}” yet.`
+                          : `No table or command matches “${term}”.`}
                 </p>
             )}
 
             <p className="palette-footer">
-                {complete
-                    ? `Searching all ${tables.length} tables.`
-                    : `Searching ${tables.length} loaded ${
-                          tables.length === 1 ? 'table' : 'tables'
-                      } — expand more namespaces in the sidebar to index them.`}
+                {coverageText(search, commandsOnly, treeTables.length, shownTables)}
             </p>
         </Modal>
     );
+}
+
+/**
+ * One line saying what the results actually cover. The tree index and the
+ * backend crawl have different reaches, and a crawl can come back partial, so
+ * silence here would read as "that table doesn't exist".
+ */
+function coverageText(
+    search: TableSearch,
+    commandsOnly: boolean,
+    treeCount: number,
+    shownTables: number,
+): string {
+    const loaded = `${treeCount} ${treeCount === 1 ? 'table' : 'tables'} loaded from the tree`;
+
+    if (commandsOnly) return 'Listing commands — remove the “>” to search tables.';
+
+    switch (search.status) {
+        case 'error':
+            return `Catalog search unavailable — showing ${loaded}.`;
+        case 'searching':
+            return `Indexing the catalog… showing ${loaded} meanwhile.`;
+        case 'ready': {
+            if (!search.complete) {
+                return `Searching ${search.indexed} indexed tables — the crawl was cut short by a size cap or a namespace it couldn't read.`;
+            }
+            const all = `Searching all ${search.indexed} tables.`;
+            return search.matched > shownTables
+                ? `${all} Showing ${shownTables} of ${search.matched} matches — refine the query.`
+                : all;
+        }
+        default:
+            return `Type to search the whole catalog — ${loaded}.`;
+    }
 }
 
 function highlight(text: string, positions: number[]) {

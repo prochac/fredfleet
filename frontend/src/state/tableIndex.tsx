@@ -8,17 +8,17 @@ export type TableTarget = {
     label: string;
 };
 
+/**
+ * The tables the lazily-loaded tree happens to have fetched. This is what the
+ * command palette can answer from with zero latency; whether it covers the
+ * whole catalog is the backend crawl's question, not this one's — see
+ * `useTableSearch`.
+ */
 export type TableIndex = {
     tables: TableTarget[];
-    /**
-     * False while any namespace is still unexpanded. The tree loads children
-     * lazily, so the palette can only search what has been fetched — the UI
-     * has to say so rather than report a bare "no results".
-     */
-    complete: boolean;
 };
 
-const EMPTY: TableIndex = {tables: [], complete: false};
+const EMPTY: TableIndex = {tables: []};
 
 const ValueCtx = createContext<TableIndex>(EMPTY);
 const SetterCtx = createContext<(i: TableIndex) => void>(() => {});
@@ -41,9 +41,9 @@ export function useTableIndex(): TableIndex {
  * store into App, because the tree is reset by remounting on connection change
  * (`key={selectedConnection}`) and lifting it would break that.
  */
-export function usePublishTableIndex(tables: TableTarget[], complete: boolean) {
+export function usePublishTableIndex(tables: TableTarget[]) {
     const setIndex = useContext(SetterCtx);
-    const value = useMemo(() => ({tables, complete}), [tables, complete]);
+    const value = useMemo(() => ({tables}), [tables]);
 
     useEffect(() => {
         setIndex(value);

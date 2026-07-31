@@ -211,7 +211,7 @@ M3b ─┘
 
 ### Tasks
 - Keyboard navigation: arrow keys in tree, Tab between panels, Escape to close dialogs *(basics landed)*
-- ✅ **Cross-platform keyboard shortcuts** — shipped, including a `Mod+K` command palette. See follow-up below.
+- ✅ **Cross-platform keyboard shortcuts** — shipped, including a `Mod+K` command palette that searches the whole catalog. See the two follow-ups below.
 - Error toasts for transient errors (network blip, credential expiry) without losing UI state
 - App icon, window title reflects active connection name
 - Build and package for macOS (arm64 + amd64) and Linux
@@ -245,9 +245,29 @@ M3b ─┘
 - `Slash` (`/`) focus and `g`-then-`t` vim chords — a two-key dispatcher isn't a convention desktop users expect here; `Mod+K` covers the same ground.
 - App-defined chord macros, user-customisable bindings, exporting shortcut prefs. Park if asked.
 
-#### Known gap → next item
+### Follow-up: full-catalog table search — **shipped**
 
-The palette indexes **only already-expanded namespaces**, because the tree loads children lazily and nothing crawls the catalog. The palette footer states its coverage rather than reporting a bare "no results". The real fix is a backend `SearchTables(connName, query, limit)` binding doing a cached, cancellable crawl — out of scope here, worth its own item.
+The palette used to index only already-expanded namespaces, because the tree loads children lazily and nothing crawled the catalog. Closed in two commits: a backend crawler, then the frontend wiring.
+
+#### What landed
+
+- `internal/catalog/search.go` — `TableSearcher` walks every namespace breadth-first through a bounded worker pool (8 workers, caps at 5k namespaces / 100k tables / depth 16) and caches the result per connection for 5 minutes. Callers racing on a cold index queue behind a context-aware gate, so a burst of keystrokes triggers one crawl, not one per keystroke.
+- Bindings `SearchTables(reqID, connName, query, limit)` and `RefreshTableIndex(connName)`; `CancelPreview` renamed `CancelRequest` since the underlying `RequestRegistry` was never preview-specific.
+- `frontend/src/state/tableSearch.ts` — `useTableSearch(connName, term, enabled)`, the palette's half. `frontend/src/hooks/useDebounced.ts` extracted from `PreviewPanel` so both share one debounce.
+- The palette merges the tree index (instant) with backend hits (deduped by dotted label), and its footer reports which reach the results came from — including a crawl that came back partial.
+- `Mod+Shift+R` now drops the backend index as well as the tree.
+
+#### Design decisions
+
+- **Crawl on first keystroke, not on palette open.** A bare `Mod+K`, or a `>` command query, costs nothing. Opening the palette to run a command shouldn't crawl a catalog.
+- **Superseded queries are not cancelled, and neither is closing the palette.** Cancelling a cold crawl discards the partial index, so an `Esc` a few seconds in would leave the user re-crawling from zero on the next open — and under fast typing the index would never finish at all. Instead one request is in flight at a time and the next is issued when it settles. The only cancel is a connection switch. This is a deliberate divergence from the M3c cancel-on-unmount rule: there, the work was a scan whose result the user had navigated away from; here it's a cache that the next open will want.
+- **Backend narrows, frontend ranks.** `search.go`'s matcher is the same diacritic-folded subsequence predicate as `fuzzy.ts` minus the scoring, so ranking and `<mark>` highlighting stay in one place instead of being reimplemented and left to drift.
+- **Search errors don't toast.** A dead catalog would fire one per keystroke; the palette footer says "Catalog search unavailable" and tree-loaded tables stay searchable.
+
+#### Deliberately not done
+
+- **Reveal-in-tree.** Jumping to a table in an unexpanded namespace opens it in the main panel and leaves the sidebar alone. Revealing would need a cascade action in `treeStore` plus a route from `App` into `NamespaceTree`'s store, which is deliberately not lifted (`key={selectedConnection}` remount idiom).
+- Persisting search state across palette opens — the backend cache already makes a reopen instant.
 
 ### Validation criteria
 - Full tree → schema → preview flow works with keyboard only
