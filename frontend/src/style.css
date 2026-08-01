@@ -508,9 +508,50 @@ tr:hover td { background: var(--row-hover); }
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    padding: 6px 12px;
+    padding: 0;
     border-bottom: 1px solid var(--border);
     white-space: nowrap;
+}
+
+/* The header is a button so sorting is reachable by keyboard, but it has to
+   keep looking like a table header rather than a control. */
+.preview-table th .sort-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 6px 12px;
+    background: none;
+    border: 0;
+    border-radius: 0;
+    color: inherit;
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    cursor: pointer;
+}
+.preview-table th .sort-header:hover {
+    background: var(--row-hover);
+}
+.preview-table th .sort-header.active {
+    color: var(--fg);
+}
+.preview-table th .sort-arrow {
+    opacity: 0.35;
+    font-size: 9px;
+}
+.preview-table th .sort-header.active .sort-arrow {
+    opacity: 1;
+}
+
+/* Spacer rows stand in for the windowed-out rows; they must not pick up the
+   cell borders or the hover treatment. */
+.preview-table tr.virtual-spacer td {
+    padding: 0;
+    border: 0;
+}
+.preview-table tr.virtual-spacer:hover td {
+    background: none;
 }
 .preview-table td {
     padding: 6px 12px;
@@ -578,10 +619,34 @@ tr:hover td { background: var(--row-hover); }
 .filter-bar-actions {
     display: flex;
     gap: 8px;
+    align-items: center;
 }
 .filter-bar-actions button {
     font-size: 13px;
     padding: 4px 12px;
+}
+.filter-bar-actions .filter-bar-spacer {
+    flex: 1 1 auto;
+}
+
+/* The join control and the "Where" that stands in for it on the first row
+   share a width, so every row's column picker starts at the same x. */
+.filter-bar-row select.join,
+.filter-bar-row .filter-join-lead {
+    flex: 0 0 64px;
+    font-size: 13px;
+}
+.filter-bar-row select.join {
+    padding: 4px 6px;
+}
+.filter-bar-row .filter-join-lead {
+    color: var(--fg-muted);
+    padding: 4px 6px;
+}
+
+.export-menu select {
+    font-size: 13px;
+    padding: 4px 8px;
 }
 .pagination-bar {
     display: flex;
@@ -643,6 +708,22 @@ tr:hover td { background: var(--row-hover); }
     font-size: 12px;
     color: var(--fg-muted);
 }
+.preview-status .sort-note {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+/* A button that reads as a link — it is an undo for the sort, not a control
+   worth the visual weight of a button. */
+.preview-status .linkish {
+    background: none;
+    border: 0;
+    padding: 0;
+    font: inherit;
+    color: var(--accent, #4a8);
+    text-decoration: underline;
+    cursor: pointer;
+}
 .preview-status .muted {
     color: var(--fg-muted);
     font-style: italic;
@@ -656,6 +737,10 @@ tr:hover td { background: var(--row-hover); }
     border-radius: 8px;
     overflow: auto;
     background: var(--bg);
+    /* Its own scroller rather than the page's: virtualization needs a
+       measurable viewport, and it keeps the filter bar and pager in place
+       while the rows scroll under the sticky header. */
+    max-height: 70vh;
 }
 .preview-empty {
     display: flex;
@@ -778,6 +863,13 @@ kbd {
 .kbd-or {
     color: var(--fg-muted);
     font-size: 11px;
+}
+/* "then", not "+": the steps of a chord are pressed one after another. */
+.kbd-then {
+    color: var(--fg-muted);
+    font-size: 11px;
+    font-style: italic;
+    padding: 0 2px;
 }
 
 

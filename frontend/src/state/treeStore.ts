@@ -213,6 +213,19 @@ export function newNamespaceNode(path: TreePath): NamespaceNode {
 export function useTreeStore(connName: string | null) {
     const [state, dispatch] = useReducer(reducer, undefined, initialState);
     const aliveRef = useRef(true);
+    // In-flight and completed child fetches, keyed by node.
+    //
+    // `state` is the authority on what is loaded, but reveal walks ancestors in
+    // an async loop and cannot see a dispatch it just made — reading `state`
+    // there would re-fetch every level. This ref is readable immediately and is
+    // also what makes a reveal of an already-loading branch join that fetch
+    // instead of starting a second one.
+    const childFetches = useRef<Map<NodeKey, Promise<void>>>(new Map());
+    const rootFetch = useRef<Promise<void> | null>(null);
+    // reveal reads the tree between awaits, by which point React has
+    // re-rendered and this ref points at the state its own dispatches produced.
+    const stateRef = useRef(state);
+    stateRef.current = state;
 
     useEffect(() => {
         aliveRef.current = true;
@@ -221,29 +234,41 @@ export function useTreeStore(connName: string | null) {
         };
     }, []);
 
+    // A different connection is a different catalog: nothing already fetched
+    // means anything.
+    useEffect(() => {
+        childFetches.current.clear();
+        rootFetch.current = null;
+    }, [connName]);
+
     const fetchRoot = useCallback(async () => {
         if (!connName) return;
         dispatch({type: 'root_loading'});
-        try {
-            const items = await ListNamespaces(connName, []);
-            if (!aliveRef.current) return;
-            const nodes: TreeNode[] = (items ?? []).map((i) => newNamespaceNode(i.path));
-            const keys = nodes.map((n) => keyOfNamespace((n as NamespaceNode).path));
-            dispatch({type: 'root_loaded', items: keys, nodes});
-        } catch (e) {
-            if (!aliveRef.current) return;
-            dispatch({type: 'root_error', error: errorMessage(e)});
-        }
+        const p = (async () => {
+            try {
+                const items = await ListNamespaces(connName, []);
+                if (!aliveRef.current) return;
+                const nodes: TreeNode[] = (items ?? []).map((i) => newNamespaceNode(i.path));
+                const keys = nodes.map((n) => keyOfNamespace((n as NamespaceNode).path));
+                dispatch({type: 'root_loaded', items: keys, nodes});
+            } catch (e) {
+                if (!aliveRef.current) return;
+                dispatch({type: 'root_error', error: errorMessage(e)});
+            }
+        })();
+        rootFetch.current = p;
+        // A reload drops what every node knew; the next reveal has to re-fetch.
+        childFetches.current.clear();
+        await p;
     }, [connName]);
 
     useEffect(() => {
         if (connName) fetchRoot();
     }, [connName, fetchRoot]);
 
-    const fetchChildren = useCallback(
-        async (path: TreePath) => {
+    const fetchChildrenOnce = useCallback(
+        async (path: TreePath, key: NodeKey) => {
             if (!connName) return;
-            const key = keyOfNamespace(path);
             dispatch({type: 'node_loading', key});
             const namespacesP = ListNamespaces(connName, path).then((items) => {
                 if (!aliveRef.current) return;
@@ -273,6 +298,65 @@ export function useTreeStore(connName: string | null) {
         [connName],
     );
 
+    const fetchChildren = useCallback(
+        async (path: TreePath) => {
+            if (!connName) return;
+            const key = keyOfNamespace(path);
+            const p = fetchChildrenOnce(path, key);
+            childFetches.current.set(key, p);
+            await p;
+        },
+        [connName, fetchChildrenOnce],
+    );
+
+    /**
+     * Opens the tree down to a table and focuses it.
+     *
+     * Walks by longest existing prefix rather than one path segment at a time,
+     * because a REST catalog is free to report "a.b" as a single top-level
+     * namespace instead of "b" inside "a" — expanding ["a"] would then be a
+     * request for a namespace that does not exist.
+     *
+     * Levels already loaded are not re-fetched, and a level currently being
+     * fetched is joined rather than fetched again, so revealing into a branch
+     * the user just expanded costs no extra calls.
+     */
+    const reveal = useCallback(
+        async (namespace: TreePath, name: string): Promise<NodeKey | null> => {
+            if (!connName) return null;
+            if (rootFetch.current) await rootFetch.current;
+            if (!aliveRef.current) return null;
+
+            let reached: TreePath = [];
+            for (;;) {
+                const next = deeperPrefixNode(stateRef.current, namespace, reached);
+                if (!next) break;
+                const key = keyOfNamespace(next);
+                const node = stateRef.current.byKey[key];
+                if (!node || node.kind !== 'namespace') break;
+
+                if (!node.expanded) dispatch({type: 'node_expanded', key, expanded: true});
+
+                const inFlight = childFetches.current.get(key);
+                if (inFlight) {
+                    await inFlight;
+                } else if (node.namespacesStatus !== 'loaded' || node.tablesStatus !== 'loaded') {
+                    await fetchChildren(next);
+                }
+                if (!aliveRef.current) return null;
+
+                reached = next;
+                if (next.length === namespace.length) break;
+            }
+
+            const tableKey = keyOfTable(namespace, name);
+            if (!stateRef.current.byKey[tableKey]) return null;
+            dispatch({type: 'focus_set', key: tableKey});
+            return tableKey;
+        },
+        [connName, fetchChildren],
+    );
+
     const expand = useCallback(
         (path: TreePath) => {
             const key = keyOfNamespace(path);
@@ -300,7 +384,45 @@ export function useTreeStore(connName: string | null) {
         dispatch({type: 'focus_set', key});
     }, []);
 
-    return {state, expand, refreshRoot: fetchRoot, refreshNode, setFocus};
+    return {state, expand, refreshRoot: fetchRoot, refreshNode, setFocus, reveal};
+}
+
+/**
+ * The *shallowest* namespace node that exists, is a prefix of `target`, and
+ * lies strictly below `reached`. Returns null when there is no more progress
+ * to make, which is what terminates the reveal walk.
+ *
+ * Shallowest, not deepest: every level on the way down has to be expanded, or
+ * the row the reveal finally focuses sits inside a collapsed branch and the
+ * user sees nothing move. Skipping to the deepest already-loaded node would do
+ * less work and show the wrong thing.
+ *
+ * Levels that do not exist are simply not returned, which is what lets the
+ * walk cope with a catalog that reports "a.b" as one namespace rather than "b"
+ * inside "a" — there, the first step is ["a","b"] itself.
+ */
+export function deeperPrefixNode(
+    state: State,
+    target: TreePath,
+    reached: TreePath,
+): TreePath | null {
+    let best: TreePath | null = null;
+    for (const node of Object.values(state.byKey)) {
+        if (node.kind !== 'namespace') continue;
+        if (node.path.length <= reached.length) continue;
+        if (node.path.length > target.length) continue;
+        if (!isPrefix(node.path, target)) continue;
+        if (!best || node.path.length < best.length) best = node.path;
+    }
+    return best;
+}
+
+function isPrefix(prefix: TreePath, path: TreePath): boolean {
+    if (prefix.length > path.length) return false;
+    for (let i = 0; i < prefix.length; i++) {
+        if (prefix[i] !== path[i]) return false;
+    }
+    return true;
 }
 
 function errorMessage(e: unknown): string {

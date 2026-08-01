@@ -1,5 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {
+    deeperPrefixNode,
     flattenVisible,
     initialState,
     keyOfNamespace,
@@ -202,5 +203,81 @@ describe('parentKey', () => {
         const key = keyOfTable(['unloaded', 'ns'], 'x');
         const s: State = {...initialState(), byKey: {[key]: orphan}};
         expect(parentKey(s, key)).toBeNull();
+    });
+});
+
+describe('deeperPrefixNode (the reveal walk)', () => {
+    it('starts at the shallowest ancestor that exists', () => {
+        const s = loadedTree();
+        expect(deeperPrefixNode(s, ['sales', 'eu'], [])).toEqual(['sales']);
+    });
+
+    it('descends one loaded level at a time', () => {
+        const s = loadedTree();
+        expect(deeperPrefixNode(s, ['sales', 'eu'], ['sales'])).toEqual(['sales', 'eu']);
+    });
+
+    it('stops when the target level is reached', () => {
+        const s = loadedTree();
+        expect(deeperPrefixNode(s, ['sales', 'eu'], ['sales', 'eu'])).toBeNull();
+    });
+
+    it('stops when the next level has not been loaded yet', () => {
+        // ["sales","eu","north"] is not in the tree, so there is no further
+        // progress to make until eu's children arrive.
+        const s = loadedTree();
+        expect(deeperPrefixNode(s, ['sales', 'eu', 'north'], ['sales', 'eu'])).toBeNull();
+    });
+
+    it('ignores namespaces that are not on the path', () => {
+        let s = loadedTree();
+        s = reducer(s, {
+            type: 'node_namespaces_loaded',
+            key: nsKey('sales'),
+            items: [nsKey('sales', 'eu'), nsKey('sales', 'us')],
+            nodes: [newNamespaceNode(['sales', 'eu']), newNamespaceNode(['sales', 'us'])],
+        });
+        expect(deeperPrefixNode(s, ['sales', 'eu'], ['sales'])).toEqual(['sales', 'eu']);
+    });
+
+    it('never returns a namespace deeper than the target', () => {
+        // A branch below the target must not be walked into.
+        let s = loadedTree();
+        s = reducer(s, {
+            type: 'node_namespaces_loaded',
+            key: nsKey('sales', 'eu'),
+            items: [nsKey('sales', 'eu', 'north')],
+            nodes: [newNamespaceNode(['sales', 'eu', 'north'])],
+        });
+        expect(deeperPrefixNode(s, ['sales', 'eu'], ['sales'])).toEqual(['sales', 'eu']);
+    });
+
+    it('jumps straight to a multi-segment namespace the catalog reports flat', () => {
+        // A REST catalog may list "sales.eu" as one top-level namespace rather
+        // than "eu" inside "sales". Walking a segment at a time would ask for
+        // ["sales"], which does not exist; the walk goes by longest existing
+        // prefix instead.
+        const flat = newNamespaceNode(['sales', 'eu']);
+        const s = reducer(initialState(), {
+            type: 'root_loaded',
+            items: [nsKey('sales', 'eu')],
+            nodes: [flat],
+        });
+        expect(deeperPrefixNode(s, ['sales', 'eu'], [])).toEqual(['sales', 'eu']);
+    });
+
+    it('returns null when nothing on the path is in the tree', () => {
+        const s = loadedTree();
+        expect(deeperPrefixNode(s, ['finance', 'ap'], [])).toBeNull();
+    });
+
+    it('does not mistake a name that merely starts the same for a prefix', () => {
+        const s = reducer(initialState(), {
+            type: 'root_loaded',
+            items: [nsKey('sale')],
+            nodes: [newNamespaceNode(['sale'])],
+        });
+        // "sale" is not an ancestor of ["sales","eu"], despite the shared text.
+        expect(deeperPrefixNode(s, ['sales', 'eu'], [])).toBeNull();
     });
 });

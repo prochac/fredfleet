@@ -67,6 +67,7 @@ strings and never inspects Go error types.
 | `ListTables(connName, namespace)`                                      | 10 s    | one tree level                                                     |
 | `LoadTable(connName, namespace, name)`                                 | 30 s    | schema + partition spec + properties                               |
 | `PreviewTable(reqID, connName, namespace, name, skip, limit, filters)` | 60 s    | the scan path                                                      |
+| `ExportPreview(reqID, connName, namespace, name, format, filters, max)`| 10 min  | save dialog, then streams CSV/JSON straight to the file            |
 | `SearchTables(reqID, connName, query, limit)`                          | 60 s    | may trigger a full catalog crawl                                   |
 | `RefreshTableIndex(connName)`                                          | —       | drops the search cache                                             |
 | `CancelRequest(reqID)`                                                 | —       | cancels a `PreviewTable` or `SearchTables` in flight               |
@@ -102,8 +103,10 @@ through to `rest.WithWarehouseLocation`.
 | `client.go`          | `Args` → `rest.With*` options; `Open()` / `Probe()`              |
 | `registry.go`        | per-connection `*rest.Catalog` cache, fingerprinting, auth retry |
 | `dto.go`, `types.go` | the wire types the frontend sees, and the conversions into them  |
-| `preview.go`         | Arrow record batches → `[]map[string]any`                        |
-| `filter.go`          | filter DTOs → `iceberg.BooleanExpression`                        |
+| `preview.go`         | Arrow record batches → `[]map[string]any`; the shared scan loop   |
+| `filter.go`          | filter DTOs → a `FilterPlan` (pushdown + residual)               |
+| `residual.go`        | predicates iceberg-go cannot push down, evaluated over Arrow      |
+| `export.go`          | streaming CSV / JSON writers over the same scan                   |
 | `cancel.go`          | `RequestRegistry` — reqID → `context.CancelFunc`                 |
 | `search.go`          | `TableSearcher` — the whole-catalog crawler and its cache        |
 | `io.go`              | side-effect import registering S3/GCS/Azure IO factories         |
@@ -168,18 +171,24 @@ kills the process, because the SIGSEGV handler WebKit installs is not
 #### Filters
 
 Filters are pushed into the scan (`table.Scan(iceberg.WithRowFilter(...))`), so
-they apply to the whole table and not to the loaded page. Multiple filters are
-AND-combined. Literal coercion per field type (string → int64, date, decimal, …)
-lives in `filter.go`.
+they apply to the whole table and not to the loaded page. Literal coercion per
+field type (string → int64, date, decimal, …) lives in `filter.go`.
 
 | UI op                       | iceberg-go constructor                                                        |
 |-----------------------------|-------------------------------------------------------------------------------|
 | `eq` / `neq`                | `EqualTo[T]` / `NotEqualTo[T]`                                                |
 | `lt` / `lte` / `gt` / `gte` | `LessThan[T]` / `LessThanEqual[T]` / `GreaterThan[T]` / `GreaterThanEqual[T]` |
+| `in` / `notin`              | `IsIn[T]` / `NotIn[T]`                                                        |
 | `isnull` / `notnull`        | `IsNull` / `NotNull`                                                          |
-| (several filters)           | `NewAnd(...)` over the list                                                   |
+| (row joins)                 | `NewAnd(...)` within a run, `NewOr(...)` across runs                          |
 
-Two decisions worth keeping:
+Rows combine through each row's `join` field, with **AND binding tighter than
+OR**, as in SQL: `a, b, or c` is `(a AND b) OR c`. The UI shows the joiner as a
+dropdown on every row after the first, so the grouping is visible rather than
+implied. `TestAndBindsTighterThanOr` pins the precedence against a fixture where
+the two readings differ.
+
+Three decisions worth keeping:
 
 - **`BuildRowFilter` returns an *unbound* expression.** It trial-binds against
   the schema to reject a bad filter early with a useful message, then throws the
@@ -191,6 +200,47 @@ Two decisions worth keeping:
   result keeps the column list, which is what leaves the "Clear filters"
   recovery path renderable — an early version stranded the user with a filter
   they could no longer edit.
+- **An empty `in` list is an error, not an empty result.** iceberg-go reduces a
+  valueless `IsIn` to `AlwaysFalse`, which would silently return no rows; the UI
+  user typed something wrong and should be told.
+
+#### Nested-field filters, and the residual pass
+
+A predicate on a field inside a struct (`addr.city`) **cannot be pushed down**
+on iceberg-go v0.6.0. Lowering a bound expression to substrait rebuilds the
+column reference from its leaf name alone —
+`table/substrait/substrait.go:318` — so `addr.city` is re-bound as `city`, which
+no top-level schema has, and the scan dies *during iteration* with
+`invalid schema: could not bind reference 'city'`. Every nested operator except
+`IsNull` fails this way.
+
+Rather than refuse the feature or fork upstream, `BuildRowFilter` splits the
+list into a **`FilterPlan`**: the part iceberg-go can evaluate during the scan,
+and a **residual** the app evaluates itself, row by row, over the returned Arrow
+batches (`residual.go`). The split rules are the soundness of the thing:
+
+- No nested field anywhere → everything is pushed down, as before.
+- A single AND-run → the top-level conjuncts are pushed down and only the
+  nested ones go residual. Each conjunct narrows the result independently, so
+  dropping one from the pushdown is safe.
+- A nested field inside an **OR** → *nothing* is pushed down. Pushing one
+  disjunct would drop rows the other would have matched, which would be a wrong
+  answer rather than a slow one.
+
+Residual predicates resolve a dotted path down through struct columns to a
+row-aligned Arrow array (`array.Struct.Field` re-slices children to the parent's
+offset, so indices line up). A value is null when its own slot is null *or* any
+struct on the way to it is, and every operator except `isnull`/`notnull` is
+false on null — Iceberg's three-valued logic, and SQL's.
+
+The cost is that a nested predicate prunes no files or row groups: the scan
+loses its row limit and keeps pulling batches until the page is full, so a
+nested filter matching nothing reads the whole table. It stays bounded by the
+same 60 s timeout and `CancelRequest` path as any other slow scan.
+
+`TestNestedPushdownStillBrokenUpstream` pins the upstream gap against a live
+fixture scan and will fail the day it is fixed — that is the signal to delete
+the residual pass.
 
 #### Pagination
 
@@ -199,9 +249,38 @@ row 0, drops the first `skip` rows, keeps the next `limit`, and probes one extra
 row to decide `HasMore` — that trailing probe is what stops the UI offering a
 "Load more" that would return nothing.
 
+That scheme is only sound if two scans of the same snapshot return rows in the
+**same order**, and by default they do not: iceberg-go fans file reads out
+across `GOMAXPROCS` workers and emits batches as they complete
+(`table/arrow_scanner.go:833`). On a table of more than one data file the order
+varies from call to call, so "Load more" could repeat rows the previous page had
+already shown while skipping others outright — on a single-file table, which is
+what the original fixtures were, the bug is invisible. `BuildPreviewRows`
+therefore pins the scan to one worker with `table.WitMaxConcurrency(1)`
+(upstream's spelling), trading file-level parallelism for a stable order.
+`TestScanOrderIsStableAcrossCalls` and `TestLoadMoreAcrossManyDataFiles` pin it.
+
 Cost is `O(skip + limit)` per call. Acceptable for browsing; deep paging on a
 large filtered scan degrades linearly, and the only hard ceiling is the 60 s
 call timeout.
+
+#### Export
+
+`ExportRows(ctx, table, w, format, filters, maxRows)` streams the rows matching
+the current filters straight to a file as CSV or JSON, one record batch at a
+time. `App.ExportPreview` puts a native save dialog in front of it and removes a
+partial file if the scan fails or is cancelled.
+
+It **re-scans** rather than serialising the frontend's row buffer. Two reasons:
+values keep their exact Go types (an `int64` past 2^53 has already been rounded
+by the time it reaches JavaScript), and the export is not limited to the pages
+the user happened to click through — "all matching rows" means all of them, on
+its own 10-minute budget and cancellable like any other scan.
+
+The consequences are stated in the UI rather than hidden: rows come out in scan
+order, so the client-side column sort is *not* reflected in the file; and CSV
+has no null, so a null cell and an empty string are both an empty field, which
+is half of why JSON is offered next to it.
 
 #### Cancellation
 
@@ -293,8 +372,82 @@ Properties.
   rule is testable without mounting a component: if the new page size fits in
   the rows already loaded, re-paginate client-side; otherwise re-scan from
   `skip = 0`.
+- `state/filters.ts` — the filter bar's rules and its per-table memory: column
+  flattening (structs are walked into and offered by dotted path; lists and maps
+  are not, since a predicate cannot reference a field through a collection),
+  operand parsing, and `toFilterList`, whose one subtlety is that `join` is
+  relative to the previous *sent* row — an incomplete row between two others
+  must not silently turn an OR into an AND while it is being typed.
+- `state/sort.ts` — the cell comparator. Numeric *strings* compare numerically,
+  because decimals arrive as strings to keep their precision and "9" must not
+  sort above "10"; ISO-8601 needs no special case, as it already sorts
+  chronologically as text.
+- `state/virtual.ts` — `windowRange()`, the windowing arithmetic, apart from
+  React so the off-by-ones are testable directly.
 - `hooks/useDebounced.ts` — one 300 ms debounce shared by the filter bar and the
-  palette.
+  palette. Its `resetKey` adopts a new value immediately instead of waiting:
+  without it, switching tables fires one fetch carrying the previous table's
+  filters, which the new table rejects.
+- `hooks/useVirtualRows.ts` — tracks the scroll container and reports the window.
+
+#### Filters persist across tables
+
+Filters are remembered per table, in a module-level map, for the life of the
+session. On arriving at a table the remembered rows are pruned against its
+schema — a column it does not have, or an operator its type cannot answer, is
+dropped and the count reported in a toast rather than sent and bounced back as
+an error nobody asked for.
+
+Restoring happens **during render**, not in an effect, because the fetch effect
+runs in the same commit and would otherwise issue a request with the outgoing
+table's filters.
+
+Deliberately not localStorage: a filter is written against a schema, and a
+schema can change between runs, so restoring one from a previous session risks
+handing back a filter that quietly no longer means what it did. Within a session
+the schema is whatever the catalog just served.
+
+#### Sorting and virtualization
+
+Sorting is TanStack's, with this project's comparator and
+`sortUndefined: 'last'` — which TanStack applies *before* it inverts for a
+descending sort, so nulls stay at the bottom either way instead of filling the
+first screen. Null reaches the table as `undefined` for that to work, and
+renders identically to it.
+
+The sort is **client-side, over the rows currently loaded**. Iceberg scans come
+back in file order and there is no `ORDER BY` to push down, so sorting 100
+loaded rows of a million-row table tells you about those 100 rows. The status
+line says exactly that while a sort is active, because an arrow in a header
+would imply otherwise.
+
+Row windowing is hand-rolled (`state/virtual.ts` + `hooks/useVirtualRows.ts`)
+rather than pulled from a library: the table is a fixed-row-height list in one
+scroller, which is the case windowing is trivial for, and TypeScript is pinned
+at 4.6, which cannot parse the `.d.ts` files current virtualizer packages ship.
+Row height is applied inline from the same constant the maths uses, so the two
+cannot drift. Below 150 rows nothing is windowed — the spacer rows would cost
+more than they save, and plain rows keep text selection working across the whole
+table.
+
+#### Reveal in tree
+
+`useTreeStore.reveal(namespace, name)` opens the tree down to a table and
+focuses it; `App` owns the request (the selection is App's) and passes it to the
+sidebar as a counter, so asking twice for the same table works after the user
+collapses the branch again.
+
+The walk descends by **shallowest existing prefix**, one level per step. Not
+one path segment per step, because a REST catalog may report `a.b` as a single
+top-level namespace rather than `b` inside `a`, and expanding `["a"]` would then
+request a namespace that does not exist. Not the deepest known node either:
+every level on the way down has to be expanded, or the row that finally takes
+focus sits inside a collapsed branch and nothing appears to happen.
+
+Levels already loaded are not re-fetched and a level mid-flight is joined rather
+than fetched again — which is why the store tracks in-flight child fetches in a
+ref: `reveal` reads the tree between awaits, and a dispatch it just made is not
+yet visible in `state`.
 
 `<Pending>` wraps every async boundary with loading / error / empty states and a
 retry callback.
@@ -317,10 +470,24 @@ single `document` keydown dispatcher), `fuzzy.ts` (diacritic-insensitive
 scorer).
 
 Shipped bindings: `Mod+K`, `Mod+,`, `Mod+N`, `Mod+0`, `Mod+1..4`, `Mod+L`,
-`Mod+F`, `Mod+R`/`F5`, `Mod+Shift+R`, `Mod+Shift+D`, `Mod+Enter`, `?`, `Esc`.
-Arrow navigation inside the tree and the tab bar. The README carries the full
-table; `KeyboardHelpModal` renders from `COMMANDS`, so the dialog cannot drift
-from the dispatcher.
+`Mod+F`, `Mod+Shift+F`, `Mod+R`/`F5`, `Mod+Shift+R`, `Mod+Shift+D`,
+`Mod+Enter`, `/`, `?`, `Esc`. Arrow navigation inside the tree and the tab bar.
+The README carries the full table; `KeyboardHelpModal` renders from `COMMANDS`,
+so the dialog cannot drift from the dispatcher.
+
+**Vim-style sequences** (`commands.ts` `chords`, dispatched by the same
+listener): `g t` tree, `g c` connection picker, `g 1..4` tabs, `g r` reveal the
+open table in the tree; `/` focuses the filter bar. A half-typed sequence is
+abandoned after 1.5 s or on `Esc`, so the keyboard is never stuck in a mode the
+user cannot see. Sequences are matched *after* single-key bindings, so a direct
+binding always wins over a prefix, and never while typing — `g` is a letter long
+before it is a prefix.
+
+Inside the tree, `j k h l` and `G` are motions and `g` belongs to the tree, so
+`g g` is "first row" and the global `g` sequences do not fire from there. That
+is vim's own rule (the focused buffer owns its motions), and it avoids a `g g`
+leaving a global sequence half-armed to swallow the next keystroke. Nothing is
+lost: `g t` only focuses the tree, and the tab sequences are also on `Mod+1..4`.
 
 - **A command registry, not lifted state.** Components subscribe handlers by id
   (`useCommand`) and the dispatcher looks them up. Chosen over lifting tab,
@@ -390,7 +557,23 @@ does not maintain an `iceberg-go` fork.
   string column with a real `iceberg.StartsWith` filter and asserts the
   failure, so the day `arrow-go` implements the mapping the test fails and
   tells us to delete the rejection.
+- **No pushdown for a nested field.** Lowering an expression to substrait
+  rebuilds the column reference from its leaf name
+  (`table/substrait/substrait.go:318`), so a predicate on `addr.city` is
+  re-bound as `city` and the scan fails mid-iteration with
+  `could not bind reference`. Every nested operator except `IsNull` fails this
+  way. Worked around at the boundary by the
+  [residual pass](#nested-field-filters-and-the-residual-pass) rather than
+  refused; `TestNestedPushdownStillBrokenUpstream` will fail when upstream
+  fixes it.
 - **No `OFFSET`** — hence scan-and-discard pagination.
+- **Scan order is not stable across calls.** File reads are fanned out over
+  `GOMAXPROCS` workers and batches are emitted as they complete
+  (`table/arrow_scanner.go:833`), so two scans of one snapshot can order rows
+  differently — which silently breaks scan-and-discard paging on any table of
+  more than one data file. Pinned to one worker with
+  `table.WitMaxConcurrency(1)` in `BuildPreviewRows`, at the cost of file-level
+  parallelism.
 - **The scanner re-binds `rowFilter` unconditionally** and panics on an
   already-bound predicate — hence the unbound expression from `BuildRowFilter`,
   and the `recover()` in `BuildPreviewRows`.
@@ -477,12 +660,27 @@ What the executable proofs cover:
 | `TestPaginationUnderFilterHasNoDuplicates` | The same under an active filter (every third row matches)                                                                                                                                                                                                  |
 | `TestHasMoreAtExactPageBoundary`           | The trailing-probe rule: a 200-row table must not offer a Load-more that returns zero rows                                                                                                                                                                 |
 | `TestStartsWithStillUnsupportedUpstream`   | The `starts` rejection is still warranted: a real `iceberg.StartsWith` scan against a string column still dies with `not implemented: starts_with`. Fails loudly if `arrow-go` ever ships the mapping                                                       |
+| `TestScanOrderIsStableAcrossCalls`         | The premise every pagination test rests on, on a *many-file* fixture: four scans return rows in the same order. Fails if the one-worker pin is removed, which is what makes the paging bug it prevents visible                                             |
+| `TestLoadMoreAcrossManyDataFiles`          | Load-more tiles a 120-row, 11-file table with no repeat and no gap — the case the single-file fixtures could not exercise                                                                                                                                  |
+| `TestAndBindsTighterThanOr`                | Filter-row precedence, against a fixture where `(a AND b) OR c` and `a AND (b OR c)` return different rows                                                                                                                                                 |
+| `TestNestedPushdownStillBrokenUpstream`    | Why `residual.go` exists: a real nested-field scan still dies with `could not bind reference`. The signal to delete the residual pass                                                                                                                      |
+| `TestNestedFilterMatchesAcrossBatches`     | The residual pass agrees with the fixture across several record batches (it is compiled per batch)                                                                                                                                                          |
+| `TestNestedNullSemantics`                  | Both ways a nested value goes missing — a null leaf and a null parent struct — count as null, and a comparison against null is false rather than a match                                                                                                    |
+| `TestNestedFilterFillsFullPage`            | A page comes back *full* and correctly offset under a residual filter, where the scan limit no longer bounds the result                                                                                                                                     |
+| `TestNestedAndTopLevelFilterSplits`        | The mixed case: the top-level half is pushed down, the nested half goes residual, and the answer is the intersection                                                                                                                                        |
+| `TestNestedInsideOrGoesFullyResidual`      | The soundness rule — an OR spanning a nested field pushes down *nothing*, because dropping a disjunct would widen the result                                                                                                                                |
+| `export_test.go`                           | CSV parses and keeps table column order; an empty result still writes a header (CSV) or `[]` (JSON); `maxRows` and filters are honoured; JSON keeps nulls null and structs nested, where CSV must flatten them                                              |
 | `preview_test.go`, `filter_test.go`        | Type coercions and filter translation                                                                                                                                                                                                                      |
 | `search_test.go`                           | Crawl, cache and matcher behaviour                                                                                                                                                                                                                         |
 | `connections/store_test.go`                | Upsert-by-name, stable order, no-op delete, 0600 + atomic rename with no stray `.tmp`, a corrupt file refusing to be clobbered, concurrent saves losing nothing, and — structurally — that no secret-shaped field can reach `connections.json`             |
 | `connections/keyring_test.go`              | Round-trip, missing entry as `""` rather than an error, idempotent delete, the `:s3` suffix keeping the two secrets apart, and a broken backend surfacing instead of yielding an empty secret. Runs against `keyring.MockInit()`, so CI needs no keychain    |
 | `frontend/src/state/pageSize.test.ts`      | 100 → 500 re-fetches at a 200-row buffer; 500 → 100 slices client-side; plus the boundary, no-op and cold-buffer cases                                                                                                                                     |
 | `frontend/src/state/treeStore.test.ts`     | Collapse and re-expand keeps loaded children and their `loaded` status — the no-re-fetch invariant; the two child slots fill independently; a parent reload does not replace a known child node; `flattenVisible` / `parentKey` ordering and dangling keys  |
+| ” (`deeperPrefixNode`)                     | The reveal walk descends one level at a time (not straight to the deepest known node, which would leave ancestors collapsed), copes with a catalog reporting `a.b` flat, and does not mistake `sale` for a prefix of `sales`                                |
+| `frontend/src/state/filters.test.ts`       | Nested struct fields are offered by dotted path while list/map children are not; binary is omitted; `join` is relative to the previous *sent* row, so an incomplete row cannot turn an OR into an AND; pruning on a table switch, and per-connection forgetting |
+| `frontend/src/state/sort.test.ts`          | Decimal strings sort numerically (`9` below `10`), blank and partial numbers stay text, and null maps to `undefined` so the column can keep nulls last in both directions                                                                                   |
+| `frontend/src/state/virtual.test.ts`       | The windowing arithmetic: padding always sums to the full height so the scrollbar cannot jump, an offset splitting a row still covers the viewport, and negative (WebKit rubber-band) and unmeasured-container cases                                        |
+| `frontend/src/shortcuts/chords.test.ts`    | The sequence table's invariants — no modifier in a step, no prefix that is also bound alone (which would make the sequence unreachable), no sequence bound twice, digits matched by `code` for the Czech row — plus step matching and `formatChord`         |
 | `frontend/src/shortcuts/keys.test.ts`      | The layout rules: Ctrl vs Cmd per platform, the other modifier locking a chord out, AltGr (`ctrl+alt`) never firing, `Mod+R` vs `Mod+Shift+R`, `shift: 'any'`, digits by `e.code` on a Czech row, letters by `e.key`, and an empty `code` matching nothing  |
 | `frontend/src/shortcuts/fuzzy.test.ts`     | Diacritic folding both directions, positions indexing the *original* accented string, and the ranking rules (word start, tight run, separator acronym, shorter target)                                                                                     |
 
@@ -588,16 +786,20 @@ webkit2gtk-4.1). macOS and Windows are built but never smoke-tested.
 
 Parked, with the reasoning that parked them:
 
-- **`IN` / `NOT IN`, OR-combined filters, filters on nested fields, sorting, row
-  virtualization, CSV/JSON export, filter state persisted across table
-  switches** — all straightforward extensions of the preview; none needed for a
-  browser.
-- **Reveal-in-tree.** Jumping to a table from an unexpanded namespace opens it
-  in the main panel and leaves the sidebar alone. Revealing would need a cascade
-  action in `treeStore` plus a route from `App` into `NamespaceTree`'s store,
-  which is deliberately not lifted (`key={selectedConnection}` remount idiom).
-- **`/` focus and `g`-then-`t` vim chords** — a two-key dispatcher is not a
-  convention desktop users expect here, and `Mod+K` covers the same ground.
+> Everything the MVP parked about the preview — `IN` / `NOT IN`, OR-combining,
+> nested-field filters, sorting, row virtualization, CSV/JSON export, filters
+> persisted across table switches — has since been built, along with
+> reveal-in-tree and the vim sequences. What each of them cost is recorded in
+> the sections above; what remains parked is below.
+
+- **Filters on a field inside a list or a map.** Iceberg predicates cannot
+  reference a field through a collection, so the filter bar does not offer one.
+  This is the spec, not an upstream gap.
+- **Server-side sorting.** There is no `ORDER BY` to push into a scan, so a sort
+  covers the loaded rows and says so. Sorting a whole table would mean either
+  reading all of it or a query engine, which is a different product.
+- **Export in the sort order shown.** The export re-scans for exact values and
+  full coverage, and a scan has no ordering to apply the UI's sort to.
 - **User-customisable keybindings, chord macros, exporting shortcut prefs.**
 - **Persisting palette search state** — the five-minute backend cache already
   makes a reopen instant.

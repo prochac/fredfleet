@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/apache/iceberg-go/catalog/rest"
@@ -21,6 +23,11 @@ const (
 	// A cold SearchTables crawls every namespace in the catalog, so it gets
 	// the same budget as a scan rather than the 10s a single list call gets.
 	searchTimeout = 60 * time.Second
+	// An export can legitimately walk a whole table, which is a different
+	// order of work from filling one preview page. It stays cancellable
+	// through CancelRequest, so this is a backstop rather than the way a user
+	// is expected to stop one.
+	exportTimeout = 10 * time.Minute
 )
 
 type App struct {
@@ -193,9 +200,11 @@ func (a *App) LoadTable(connName string, namespace []string, name string) (*cata
 // PreviewTable scans the table and returns up to limit rows starting at
 // offset skip, as JSON-friendly values. limit ≤ 0 defaults to 100 rows;
 // negative skip is clamped to 0. reqID lets the frontend cancel an in-flight
-// scan via CancelRequest on unmount; pass "" to opt out. filters are
-// AND-combined and pushed down to the iceberg-go scan; an empty list returns
-// the unfiltered preview. Pagination is scan-and-discard: every call rescans
+// scan via CancelRequest on unmount; pass "" to opt out. filters combine per
+// their Join field (AND binding tighter than OR) and are pushed down to the
+// iceberg-go scan where they can be; a filter on a nested field is applied
+// after the scan instead, see catalog/residual.go. An empty list returns the
+// unfiltered preview. Pagination is scan-and-discard: every call rescans
 // from row 0 and drops the first skip rows, so cost is O(skip+limit) per call.
 // PreviewRowsDTO.HasMore is true when the iterator still had rows beyond
 // skip+limit, meaning the caller can fetch the next page.
@@ -215,6 +224,87 @@ func (a *App) PreviewTable(reqID, connName string, namespace []string, name stri
 		return err
 	})
 	return dto, err
+}
+
+// ExportPreview writes the rows matching filters to a file the user picks,
+// as CSV or JSON, and returns the path written to. It returns an empty path
+// when the user cancels the save dialog — not an error, so the frontend can
+// tell "nothing to report" from "the export failed".
+//
+// maxRows caps the export; 0 means every matching row. The export re-scans
+// rather than serialising the frontend's row buffer, so values keep their
+// exact types and the file is not limited to the pages already loaded — see
+// catalog.ExportRows. That also means the rows come out in scan order: a sort
+// applied in the preview table orders the loaded page only, and is not
+// reflected in the file.
+//
+// An export of a whole table is a long scan, so it gets its own budget rather
+// than the preview's 60 s and is cancellable through reqID like any other
+// scan.
+func (a *App) ExportPreview(
+	reqID, connName string,
+	namespace []string,
+	name, format string,
+	filters []catalog.PreviewFilterDTO,
+	maxRows int,
+) (string, error) {
+	defaultName := strings.Join(append(append([]string(nil), namespace...), name), ".")
+	switch format {
+	case catalog.ExportFormatCSV:
+		defaultName += ".csv"
+	case catalog.ExportFormatJSON:
+		defaultName += ".json"
+	default:
+		return "", errors.New("Unsupported export format: " + format)
+	}
+
+	path, err := wruntime.SaveFileDialog(a.ctx, wruntime.SaveDialogOptions{
+		Title:                "Export rows",
+		DefaultFilename:      defaultName,
+		CanCreateDirectories: true,
+	})
+	if err != nil {
+		wruntime.LogError(a.ctx, "export save dialog: "+err.Error())
+		return "", errors.New("Failed to open the save dialog: " + err.Error())
+	}
+	if path == "" {
+		return "", nil // user cancelled
+	}
+
+	err = a.withCatalog(connName, "export preview", func(cat *rest.Catalog) error {
+		reqCtx, release := a.requests.Register(a.ctx, reqID)
+		defer release()
+		ctx, cancel := context.WithTimeout(reqCtx, exportTimeout)
+		defer cancel()
+
+		ident := append(append([]string(nil), namespace...), name)
+		tbl, err := cat.LoadTable(ctx, ident)
+		if err != nil {
+			return err
+		}
+
+		f, err := os.Create(path)
+		if err != nil {
+			return err
+		}
+		// A failed or cancelled export must not leave a half-written file
+		// behind that looks like a complete one.
+		defer func() {
+			if cerr := f.Close(); cerr == nil && err == nil {
+				return
+			}
+			os.Remove(path)
+		}()
+
+		if _, err = catalog.ExportRows(ctx, tbl, f, format, filters, maxRows); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // SearchTables returns tables whose fully-qualified name fuzzy-matches query,

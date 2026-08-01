@@ -1,7 +1,7 @@
 import {useEffect, useMemo, useRef, useState, type KeyboardEvent} from 'react';
 import {COMMANDS, type CommandDef} from '../shortcuts/commands';
 import {fuzzyMatch} from '../shortcuts/fuzzy';
-import {formatShortcut} from '../shortcuts/keys';
+import {formatChord, formatShortcut} from '../shortcuts/keys';
 import {useIsCommandLive, useRunCommand} from '../shortcuts/registry';
 import {useTableIndex, type TableTarget} from '../state/tableIndex';
 import {useTableSearch, type TableSearch} from '../state/tableSearch';
@@ -159,11 +159,19 @@ export function CommandPalette({connName, onClose, onOpenTable}: Props) {
                                     {highlight(item.command.title, item.positions)}
                                 </span>
                                 <span className="palette-meta">
-                                    {item.command.keys.length > 0
-                                        ? formatShortcut(item.command.keys[0]).map((k) => (
-                                              <kbd key={k}>{k}</kbd>
-                                          ))
-                                        : item.command.group}
+                                    {item.command.keys.length > 0 ? (
+                                        formatShortcut(item.command.keys[0]).map((k) => (
+                                            <kbd key={k}>{k}</kbd>
+                                        ))
+                                    ) : item.command.chords?.length ? (
+                                        // A sequence, so the steps are shown
+                                        // one after another rather than joined.
+                                        formatChord(item.command.chords[0]).map((step, i) => (
+                                            <kbd key={step + i}>{step}</kbd>
+                                        ))
+                                    ) : (
+                                        item.command.group
+                                    )}
                                 </span>
                             </>
                         )}

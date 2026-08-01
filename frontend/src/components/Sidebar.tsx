@@ -35,6 +35,8 @@ type Props = {
     onOpenHelp: () => void;
     selectedTable: {namespace: TreePath; name: string} | null;
     onSelectTable: (t: {namespace: TreePath; name: string}) => void;
+    /** Bumped to ask the tree to open down to the selected table. */
+    revealNonce?: number;
 };
 
 export function Sidebar({
@@ -45,6 +47,7 @@ export function Sidebar({
     onOpenHelp,
     selectedTable,
     onSelectTable,
+    revealNonce,
 }: Props) {
     const pickerRef = useRef<HTMLSelectElement>(null);
     const paletteKeys = formatShortcut(COMMANDS.find((c) => c.id === 'palette.open')!.keys[0]);
@@ -100,6 +103,7 @@ export function Sidebar({
                 connName={selected}
                 selectedTable={selectedTable}
                 onSelectTable={onSelectTable}
+                revealNonce={revealNonce}
             />
             <footer className="sidebar-footer">
                 <span className="kbd-inline">

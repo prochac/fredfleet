@@ -127,7 +127,15 @@ export function TableMetadataPanel({connName, namespace, name}: Props) {
                             ))}
                         </div>
                         <div role="tabpanel" hidden={tab !== 'preview'}>
-                            <PreviewPanel connName={connName} namespace={namespace} name={name} />
+                            {/* The schema is what lets the filter bar offer
+                                fields nested inside structs — the scan's own
+                                column list only describes the top level. */}
+                            <PreviewPanel
+                                connName={connName}
+                                namespace={namespace}
+                                name={name}
+                                schema={data.schema}
+                            />
                         </div>
                         <div className="metadata-narrow" role="tabpanel" hidden={tab !== 'schema'}>
                             <SchemaPanel schema={data.schema} />

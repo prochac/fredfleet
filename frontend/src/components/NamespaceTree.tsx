@@ -1,4 +1,4 @@
-import {KeyboardEvent, useEffect, useMemo, useRef} from 'react';
+import {KeyboardEvent, useEffect, useMemo, useRef, useState} from 'react';
 import {RefreshTableIndex} from '../../wailsjs/go/main/App';
 import {
     flattenVisible,
@@ -10,6 +10,7 @@ import {
 import type {NodeKey, TableNode} from '../state/treeStore';
 import {usePublishTableIndex} from '../state/tableIndex';
 import {PRIORITY, useCommand} from '../shortcuts/registry';
+import {toastInfo} from '../toast';
 import {TreeNode} from './TreeNode';
 import {Pending} from './Pending';
 
@@ -17,10 +18,16 @@ type Props = {
     connName: string | null;
     selectedTable: {namespace: TreePath; name: string} | null;
     onSelectTable: (t: {namespace: TreePath; name: string}) => void;
+    /**
+     * Bumped by App to ask for the selected table to be revealed. A counter
+     * rather than a boolean so asking twice for the same table works — the
+     * user may have collapsed the branch in between.
+     */
+    revealNonce?: number;
 };
 
-export function NamespaceTree({connName, selectedTable, onSelectTable}: Props) {
-    const {state, expand, refreshRoot, refreshNode, setFocus} = useTreeStore(connName);
+export function NamespaceTree({connName, selectedTable, onSelectTable, revealNonce}: Props) {
+    const {state, expand, refreshRoot, refreshNode, setFocus, reveal} = useTreeStore(connName);
     const treeRef = useRef<HTMLDivElement>(null);
     const rowRefs = useRef<Map<NodeKey, HTMLDivElement>>(new Map());
     const registerRow = (key: NodeKey, el: HTMLDivElement | null) => {
@@ -55,11 +62,78 @@ export function NamespaceTree({connName, selectedTable, onSelectTable}: Props) {
         if (el && el !== document.activeElement) el.focus();
     }, [focusedKey]);
 
+    // `g` waits for a second key, vim-style.
+    //
+    // While the tree has focus, `g` belongs to the tree and is not passed on —
+    // so `gg` is "first row" here and the global `g`-prefixed sequences do not
+    // fire from inside the tree. That is the same rule vim uses (the focused
+    // buffer owns its motions), it keeps `gg` from half-arming a global chord
+    // that would then swallow the next keystroke, and nothing is lost: `g t`
+    // only focuses the tree, and the tab sequences are also on Mod+1…4.
+    const pendingGRef = useRef(false);
+
     function handleKeyDown(e: KeyboardEvent<HTMLDivElement>) {
         if (!focusedKey || visible.length === 0) return;
         const idx = visible.indexOf(focusedKey);
         const node = state.byKey[focusedKey];
         if (!node) return;
+
+        // --- vim motions -----------------------------------------------
+        const plainKey = !e.ctrlKey && !e.metaKey && !e.altKey;
+        if (pendingGRef.current) {
+            pendingGRef.current = false;
+            if (e.key === 'g') {
+                e.preventDefault();
+                e.stopPropagation();
+                moveFocus(visible[0]); // gg — first row
+                return;
+            }
+            // Any other key ends the sequence and is handled normally below.
+        } else if (e.key === 'g' && plainKey) {
+            pendingGRef.current = true;
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
+
+        switch (e.key) {
+            case 'j': {
+                e.preventDefault();
+                e.stopPropagation();
+                if (idx >= 0 && idx < visible.length - 1) moveFocus(visible[idx + 1]);
+                return;
+            }
+            case 'k': {
+                e.preventDefault();
+                e.stopPropagation();
+                if (idx > 0) moveFocus(visible[idx - 1]);
+                return;
+            }
+            case 'h': {
+                e.preventDefault();
+                e.stopPropagation();
+                if (node.kind === 'namespace' && node.expanded) {
+                    expand(node.path); // collapse
+                } else {
+                    const p = parentKey(state, focusedKey);
+                    if (p) moveFocus(p);
+                }
+                return;
+            }
+            case 'l': {
+                e.preventDefault();
+                e.stopPropagation();
+                if (node.kind === 'namespace' && !node.expanded) expand(node.path);
+                else if (idx >= 0 && idx < visible.length - 1) moveFocus(visible[idx + 1]);
+                return;
+            }
+            case 'G': {
+                e.preventDefault();
+                e.stopPropagation();
+                moveFocus(visible[visible.length - 1]);
+                return;
+            }
+        }
 
         switch (e.key) {
             case 'ArrowDown': {
@@ -133,6 +207,35 @@ export function NamespaceTree({connName, selectedTable, onSelectTable}: Props) {
         el.focus();
         el.scrollIntoView({block: 'nearest'});
     });
+
+    // Reveal: expand down to the open table and put the keyboard on it. The
+    // DOM row does not exist until the branch has rendered, so the scroll is
+    // deferred to an effect keyed on the focus the reveal set.
+    const [revealedKey, setRevealedKey] = useState<NodeKey | null>(null);
+    useEffect(() => {
+        if (!revealNonce || !selectedTable) return;
+        let cancelled = false;
+        reveal(selectedTable.namespace, selectedTable.name).then((key) => {
+            if (cancelled) return;
+            if (key) setRevealedKey(key);
+            else toastInfo('That table is no longer in the tree — try reloading it.');
+        });
+        return () => {
+            cancelled = true;
+        };
+        // selectedTable is intentionally not a dep: a reveal happens when asked
+        // for, not every time the selection changes.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [revealNonce, reveal]);
+
+    useEffect(() => {
+        if (!revealedKey) return;
+        const el = rowRefs.current.get(revealedKey);
+        if (!el) return;
+        el.focus();
+        el.scrollIntoView({block: 'nearest'});
+        setRevealedKey(null);
+    }, [revealedKey, visible]);
 
     const indexedTables = useMemo(
         () =>

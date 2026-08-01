@@ -1,4 +1,4 @@
-import type {KeySpec} from './keys';
+import type {ChordSpec, KeySpec} from './keys';
 
 export type CommandId =
     | 'palette.open'
@@ -16,7 +16,12 @@ export type CommandId =
     | 'refresh.scope'
     | 'refresh.treeRoot'
     | 'filters.applyNow'
-    | 'filters.clear';
+    | 'filters.clear'
+    | 'filters.add'
+    | 'sort.clear'
+    | 'export.csv'
+    | 'export.json'
+    | 'tree.reveal';
 
 export type CommandGroup = 'Global' | 'Navigation' | 'Data';
 
@@ -25,8 +30,14 @@ export type CommandDef = {
     /** Label shown in the help dialog and the command palette. */
     title: string;
     group: CommandGroup;
-    /** Empty means palette-only — no key binding. */
+    /** Empty means no direct binding; the command is reachable via the palette. */
     keys: KeySpec[];
+    /**
+     * Vim-style sequences, typed one key after another. They carry no
+     * modifier, so they never fire while focus is in a text field — see
+     * useGlobalShortcuts.
+     */
+    chords?: ChordSpec[];
     /** Fire even when focus is in a form control. Defaults to true for Mod-chorded keys. */
     firesWhileTyping?: boolean;
     /**
@@ -99,51 +110,70 @@ export const COMMANDS: CommandDef[] = [
     // Digit chords match on `code` so they survive the Czech number row, and
     // leave Shift unconstrained because typing a digit there needs Shift —
     // a user may well press it out of habit. Nothing binds Mod+Shift+digit.
+    // The `g`-prefixed sequences mirror the Mod+digit bindings on the same
+    // commands. `g` alone is bound to nothing, which is what leaves it free to
+    // be a prefix.
     {
         id: 'focus.tree',
         title: 'Focus the namespace tree',
         group: 'Navigation',
         keys: [{code: 'Digit0', mod: true, shift: 'any'}],
+        chords: [[{key: 'g'}, {key: 't'}]],
     },
     {
         id: 'tab.preview',
         title: 'Go to Preview',
         group: 'Navigation',
         keys: [{code: 'Digit1', mod: true, shift: 'any'}],
+        chords: [[{key: 'g'}, {code: 'Digit1', shift: 'any'}]],
     },
     {
         id: 'tab.schema',
         title: 'Go to Schema',
         group: 'Navigation',
         keys: [{code: 'Digit2', mod: true, shift: 'any'}],
+        chords: [[{key: 'g'}, {code: 'Digit2', shift: 'any'}]],
     },
     {
         id: 'tab.partition',
         title: 'Go to Partition spec',
         group: 'Navigation',
         keys: [{code: 'Digit3', mod: true, shift: 'any'}],
+        chords: [[{key: 'g'}, {code: 'Digit3', shift: 'any'}]],
     },
     {
         id: 'tab.properties',
         title: 'Go to Properties',
         group: 'Navigation',
         keys: [{code: 'Digit4', mod: true, shift: 'any'}],
+        chords: [[{key: 'g'}, {code: 'Digit4', shift: 'any'}]],
     },
     {
         id: 'focus.connectionPicker',
         title: 'Focus the connection picker',
         group: 'Navigation',
         keys: [{key: 'l', mod: true}],
+        chords: [[{key: 'g'}, {key: 'c'}]],
     },
     {
         id: 'focus.filter',
         title: 'Focus the preview filter bar',
         group: 'Navigation',
-        keys: [{key: 'f', mod: true}],
-        // Shadows the webview's find-in-page, which we have no use for; the
-        // filter bar is this app's find. Swallow it even with no table open,
-        // otherwise find-in-page opens over the UI.
+        // `/` is the vim-ish way in. It carries no modifier, so the per-spec
+        // default keeps it from firing while the user is typing into a filter
+        // value — while Mod+F, which does carry one, still works from there.
+        keys: [{key: 'f', mod: true}, {key: '/', shift: 'any'}],
+        // Mod+F shadows the webview's find-in-page, which we have no use for;
+        // the filter bar is this app's find. Swallow it even with no table
+        // open, otherwise find-in-page opens over the UI.
         alwaysPreventDefault: true,
+    },
+    {
+        id: 'tree.reveal',
+        title: 'Reveal the open table in the tree',
+        group: 'Navigation',
+        keys: [],
+        chords: [[{key: 'g'}, {key: 'r'}]],
     },
 
     {
@@ -174,6 +204,32 @@ export const COMMANDS: CommandDef[] = [
     {
         id: 'filters.clear',
         title: 'Clear all preview filters',
+        group: 'Data',
+        keys: [],
+    },
+    {
+        id: 'filters.add',
+        title: 'Add a filter row',
+        group: 'Data',
+        keys: [{key: 'f', mod: true, shift: true}],
+    },
+    {
+        id: 'sort.clear',
+        title: 'Clear the column sort',
+        group: 'Data',
+        keys: [],
+    },
+    // Export opens a native save dialog, which is not something to put behind
+    // a key that could be hit by accident — palette-only on purpose.
+    {
+        id: 'export.csv',
+        title: 'Export loaded rows as CSV…',
+        group: 'Data',
+        keys: [],
+    },
+    {
+        id: 'export.json',
+        title: 'Export loaded rows as JSON…',
         group: 'Data',
         keys: [],
     },

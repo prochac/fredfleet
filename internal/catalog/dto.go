@@ -103,13 +103,25 @@ type PreviewRowsDTO struct {
 	HasMore  bool               `json:"hasMore"`
 }
 
-// PreviewFilterDTO is one row of the filter row above the preview table. Field
-// is the top-level Iceberg column name. Op is one of:
-// "eq", "neq", "lt", "lte", "gt", "gte", "isnull", "notnull", "starts".
+// PreviewFilterDTO is one row of the filter bar above the preview table.
+//
+// Field is an Iceberg column name, dotted for a field inside a struct
+// ("addr.city"). Op is one of:
+// "eq", "neq", "lt", "lte", "gt", "gte", "in", "notin", "isnull", "notnull",
+// "starts".
+//
 // Value is the raw JSON value from the input (typically a string for typed
-// inputs); ignored for "isnull"/"notnull".
+// inputs); ignored for "isnull"/"notnull". Values carries the operand list for
+// "in"/"notin" instead, and a lone Value is accepted there as a one-element
+// list.
+//
+// Join says how this row combines with the one before it: "and" (the default,
+// and what an absent value means) or "or". AND binds tighter than OR, as in
+// SQL, so a, b, or-c reads as (a AND b) OR c. The first row's Join is ignored.
 type PreviewFilterDTO struct {
-	Field string `json:"field"`
-	Op    string `json:"op"`
-	Value any    `json:"value,omitempty"`
+	Field  string `json:"field"`
+	Op     string `json:"op"`
+	Value  any    `json:"value,omitempty"`
+	Values []any  `json:"values,omitempty"`
+	Join   string `json:"join,omitempty"`
 }

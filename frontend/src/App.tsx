@@ -16,6 +16,7 @@ import type {OverlayState} from './shortcuts/useGlobalShortcuts';
 import {initPlatform} from './shortcuts/keys';
 import {TableIndexProvider} from './state/tableIndex';
 import type {TreePath} from './state/treeStore';
+import {forgetConnectionFilters} from './state/filters';
 import {initTheme, useTheme} from './theme';
 import {toastError} from './toast';
 
@@ -37,6 +38,10 @@ export default function App() {
     const [selectedConnection, setSelectedConnection] = useState<string | null>(null);
     const [selectedTable, setSelectedTable] = useState<SelectedTable>(null);
     const [paletteOpen, setPaletteOpen] = useState(false);
+    // Asking the tree to reveal the open table is an event, not a state, so it
+    // travels as a counter — the same table can be revealed twice, which is
+    // exactly what happens after the user collapses the branch again.
+    const [revealNonce, setRevealNonce] = useState(0);
     const mainRef = useRef<HTMLElement>(null);
     // sonner's own "system" mode reads prefers-color-scheme, which ignores a
     // pinned preference — hand it the resolved theme instead.
@@ -98,6 +103,10 @@ export default function App() {
     async function handleConfirmDelete(name: string) {
         try {
             await DeleteConnection(name);
+            // The per-table filters kept for this connection can never apply
+            // again, and a connection re-added under the same name is not the
+            // same catalog.
+            forgetConnectionFilters(name);
             setModal({kind: 'manage'});
             if (selectedConnection === name) {
                 setSelectedConnection(null);
@@ -124,6 +133,8 @@ export default function App() {
                         onManage={() => setModal({kind: 'manage'})}
                         onNew={() => setModal({kind: 'add', returnTo: 'none'})}
                         onTogglePalette={() => setPaletteOpen((v) => !v)}
+                        onRevealInTree={() => setRevealNonce((n) => n + 1)}
+                        canReveal={!!selectedTable}
                     />
                     <Sidebar
                         connectionsList={items}
@@ -133,6 +144,7 @@ export default function App() {
                         onOpenHelp={() => setModal({kind: 'help'})}
                         selectedTable={selectedTable}
                         onSelectTable={setSelectedTable}
+                        revealNonce={revealNonce}
                         key={selectedConnection ?? '__none__'}
                     />
                     <main className="main" ref={mainRef}>
@@ -232,16 +244,23 @@ function AppCommands({
     onManage,
     onNew,
     onTogglePalette,
+    onRevealInTree,
+    canReveal,
 }: {
     onHelp: () => void;
     onManage: () => void;
     onNew: () => void;
     onTogglePalette: () => void;
+    onRevealInTree: () => void;
+    canReveal: boolean;
 }) {
     useCommand('help.open', onHelp);
     useCommand('connections.manage', onManage);
     useCommand('connections.new', onNew);
     useCommand('palette.open', onTogglePalette);
+    // Registered from App rather than from the tree because the thing being
+    // revealed is App's selection; the tree only owns how to get there.
+    useCommand('tree.reveal', onRevealInTree, canReveal);
     return null;
 }
 

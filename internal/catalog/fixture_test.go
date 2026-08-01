@@ -126,6 +126,96 @@ func newFixtureTable(t *testing.T, nrows, batchRows int, tagFor func(i int) stri
 	return tbl
 }
 
+// nestedFixtureSchema adds a struct column to the fixture shape so the
+// nested-field filter tests have somewhere to nest. Row i gets
+// addr.city = "city-<i%3>" and addr.zip = 10000+i, except that every 5th row
+// (i%5 == 4) has a null `addr` outright and every 7th (i%7 == 3, addr not null)
+// has a null city — the two ways a nested value can be absent.
+func nestedFixtureSchema() (*iceberg.Schema, *arrow.Schema) {
+	ice := iceberg.NewSchema(0,
+		iceberg.NestedField{ID: 1, Name: "id", Type: iceberg.PrimitiveTypes.Int64, Required: true},
+		iceberg.NestedField{ID: 2, Name: "addr", Type: &iceberg.StructType{
+			FieldList: []iceberg.NestedField{
+				{ID: 3, Name: "city", Type: iceberg.PrimitiveTypes.String},
+				{ID: 4, Name: "zip", Type: iceberg.PrimitiveTypes.Int32},
+			},
+		}},
+	)
+	arr := arrow.NewSchema([]arrow.Field{
+		{Name: "id", Type: arrow.PrimitiveTypes.Int64, Nullable: false},
+		{Name: "addr", Type: arrow.StructOf(
+			arrow.Field{Name: "city", Type: arrow.BinaryTypes.String, Nullable: true},
+			arrow.Field{Name: "zip", Type: arrow.PrimitiveTypes.Int32, Nullable: true},
+		), Nullable: true},
+	}, nil)
+	return ice, arr
+}
+
+func nestedAddrIsNull(i int) bool { return i%5 == 4 }
+func nestedCityIsNull(i int) bool { return !nestedAddrIsNull(i) && i%7 == 3 }
+func nestedCityOf(i int) string   { return fmt.Sprintf("city-%d", i%3) }
+
+// newNestedFixtureTable builds the nested-column fixture, in batches of
+// batchRows so the residual pass has to span several record batches.
+func newNestedFixtureTable(t *testing.T, nrows, batchRows int) *table.Table {
+	t.Helper()
+	ctx := t.Context()
+
+	dir := t.TempDir()
+	loc := "file://" + filepath.ToSlash(dir)
+	iceSchema, arrSchema := nestedFixtureSchema()
+
+	meta, err := table.NewMetadata(iceSchema, iceberg.UnpartitionedSpec, table.UnsortedSortOrder, loc, nil)
+	if err != nil {
+		t.Fatalf("new metadata: %v", err)
+	}
+	fsF := icebergio.LoadFSFunc(nil, loc)
+	metaLoc := filepath.Join(dir, "metadata", "v1.metadata.json")
+	ident := table.Identifier{"ns", "nested"}
+	cat := &memCatalog{meta: meta, loc: metaLoc, fsF: fsF, ident: ident}
+	tbl := table.New(ident, meta, metaLoc, fsF, cat)
+
+	mem := memory.NewGoAllocator()
+	for start := 0; start < nrows; start += batchRows {
+		end := min(start+batchRows, nrows)
+
+		rb := array.NewRecordBuilder(mem, arrSchema)
+		ids := rb.Field(0).(*array.Int64Builder)
+		addr := rb.Field(1).(*array.StructBuilder)
+		city := addr.FieldBuilder(0).(*array.StringBuilder)
+		zip := addr.FieldBuilder(1).(*array.Int32Builder)
+		for i := start; i < end; i++ {
+			ids.Append(int64(i))
+			if nestedAddrIsNull(i) {
+				// AppendNull is Append(false), which already appends a null to
+				// every child builder — doing it again here would shift the
+				// children out of step with the struct.
+				addr.AppendNull()
+				continue
+			}
+			addr.Append(true)
+			if nestedCityIsNull(i) {
+				city.AppendNull()
+			} else {
+				city.Append(nestedCityOf(i))
+			}
+			zip.Append(int32(10000 + i))
+		}
+		rec := rb.NewRecordBatch()
+		at := array.NewTableFromRecords(arrSchema, []arrow.RecordBatch{rec})
+
+		tbl, err = tbl.AppendTable(ctx, at, int64(end-start), nil)
+
+		at.Release()
+		rec.Release()
+		rb.Release()
+		if err != nil {
+			t.Fatalf("append rows [%d,%d): %v", start, end, err)
+		}
+	}
+	return tbl
+}
+
 // rowIDs pulls the id column out of a preview result, failing the test if any
 // row is missing it or carries an unexpected type.
 func rowIDs(t *testing.T, dto *PreviewRowsDTO) []int64 {

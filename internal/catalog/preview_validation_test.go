@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -145,6 +146,75 @@ func TestLoadMoreProducesNoDuplicates(t *testing.T) {
 		if id != int64(i) {
 			t.Fatalf("row %d has id %d; pages did not tile the table in order", i, id)
 		}
+	}
+}
+
+// TestScanOrderIsStableAcrossCalls is the premise every other pagination test
+// here rests on, and it does not hold for free.
+//
+// The fixtures above are written in a single append, so they are a single data
+// file and their order is trivially stable. This one is written in small
+// batches — many data files — which is where iceberg-go's default fan-out
+// (GOMAXPROCS workers emitting batches as they finish) makes the row order
+// differ from one scan to the next. Under that order, "Load more" with
+// skip=len(loaded) repeats rows and drops others. BuildPreviewRows pins the
+// scan to one worker to prevent it; this test fails if that option is removed.
+func TestScanOrderIsStableAcrossCalls(t *testing.T) {
+	tbl := newNestedFixtureTable(t, 60, 7)
+	ctx := t.Context()
+
+	var first []int64
+	for run := range 4 {
+		dto, err := BuildPreviewRows(ctx, tbl, 0, 100, nil)
+		if err != nil {
+			t.Fatalf("run %d: %v", run, err)
+		}
+		ids := rowIDs(t, dto)
+		if run == 0 {
+			first = ids
+			continue
+		}
+		if !slices.Equal(ids, first) {
+			t.Fatalf("scan order changed between calls, so page N+1 cannot be "+
+				"trusted to continue page N:\n first = %v\n run %d = %v", first, run, ids)
+		}
+	}
+}
+
+// TestLoadMoreAcrossManyDataFiles is TestLoadMoreProducesNoDuplicates on a
+// table that is many data files rather than one — the case that actually
+// exercises scan ordering.
+func TestLoadMoreAcrossManyDataFiles(t *testing.T) {
+	const (
+		rows     = 120
+		pageSize = 17 // deliberately not a divisor of the batch or row count
+	)
+	tbl := newNestedFixtureTable(t, rows, 11)
+	ctx := t.Context()
+
+	seen := map[int64]int{}
+	loaded := 0
+	for page := 0; ; page++ {
+		dto, err := BuildPreviewRows(ctx, tbl, loaded, pageSize, nil)
+		if err != nil {
+			t.Fatalf("page %d (skip=%d): %v", page, loaded, err)
+		}
+		for _, id := range rowIDs(t, dto) {
+			if prev, dup := seen[id]; dup {
+				t.Fatalf("id %d returned on page %d and again on page %d", id, prev, page)
+			}
+			seen[id] = page
+			loaded++
+		}
+		if !dto.HasMore {
+			break
+		}
+		if page > 20 {
+			t.Fatalf("pagination did not terminate (%d rows loaded)", loaded)
+		}
+	}
+	if loaded != rows {
+		t.Fatalf("pages covered %d rows, want all %d", loaded, rows)
 	}
 }
 

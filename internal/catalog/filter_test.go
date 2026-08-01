@@ -21,12 +21,15 @@ func testSchema() *iceberg.Schema {
 }
 
 func TestBuildRowFilter_Empty(t *testing.T) {
-	expr, err := BuildRowFilter(testSchema(), nil)
+	plan, err := BuildRowFilter(testSchema(), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if _, ok := expr.(iceberg.AlwaysTrue); !ok {
-		t.Fatalf("expected AlwaysTrue, got %T", expr)
+	if _, ok := plan.Pushdown.(iceberg.AlwaysTrue); !ok {
+		t.Fatalf("expected AlwaysTrue, got %T", plan.Pushdown)
+	}
+	if !plan.Residual.Empty() {
+		t.Fatal("empty filter list planned a residual pass")
 	}
 }
 
@@ -92,7 +95,7 @@ func TestBuildRowFilter_BoolOrderedRejected(t *testing.T) {
 }
 
 func TestBuildRowFilter_AndCombined(t *testing.T) {
-	expr, err := BuildRowFilter(testSchema(), []PreviewFilterDTO{
+	plan, err := BuildRowFilter(testSchema(), []PreviewFilterDTO{
 		{Field: "id", Op: "gt", Value: "100"},
 		{Field: "name", Op: "eq", Value: "A"},
 		{Field: "born", Op: "lte", Value: "1990-01-01"},
@@ -100,11 +103,11 @@ func TestBuildRowFilter_AndCombined(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if expr == nil {
+	if plan.Pushdown == nil {
 		t.Fatal("expected non-nil expression")
 	}
-	if expr.Op() != iceberg.OpAnd {
-		t.Fatalf("expected OpAnd, got %v", expr.Op())
+	if plan.Pushdown.Op() != iceberg.OpAnd {
+		t.Fatalf("expected OpAnd, got %v", plan.Pushdown.Op())
 	}
 }
 

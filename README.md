@@ -103,15 +103,29 @@ the same list, rendered for the platform you're on.
 | `Mod+0`           | Focus the namespace tree                           |
 | `Mod+1` … `Mod+4` | Preview / Schema / Partition spec / Properties     |
 | `Mod+L`           | Focus the connection picker                        |
-| `Mod+F`           | Focus the preview filter bar                       |
+| `Mod+F`, `/`      | Focus the preview filter bar                       |
+| `Mod+Shift+F`     | Add a filter row                                   |
 | `Mod+R`, `F5`     | Refresh the current view                           |
 | `Mod+Shift+R`     | Reload the namespace tree from the root            |
 | `Mod+Enter`       | Apply filters now, skipping the 300 ms debounce    |
 | `Esc`             | Close the current dialog                           |
 
-Within the namespace tree: `↑`/`↓` move, `→` expands, `←` collapses, `Home`/`End`
-jump to the ends, `Enter` opens a table. The tab bar takes `←`/`→` and
-`Home`/`End`. `Tab` moves between the sidebar, the tab bar, and panel controls.
+Vim-style sequences — press the keys one after another, not together:
+
+| Sequence      | Action                                         |
+|---------------|------------------------------------------------|
+| `g` `t`       | Focus the namespace tree                       |
+| `g` `c`       | Focus the connection picker                    |
+| `g` `1` … `4` | Preview / Schema / Partition spec / Properties |
+| `g` `r`       | Reveal the open table in the tree              |
+
+An unfinished sequence is dropped after 1.5 seconds or on `Esc`, and sequences
+never fire while you are typing in a field.
+
+Within the namespace tree: `↑`/`↓` or `j`/`k` move, `→`/`l` expands, `←`/`h`
+collapses, `Home`/`End` or `gg`/`G` jump to the ends, `Enter` opens a table. The
+tab bar takes `←`/`→` and `Home`/`End`. `Tab` moves between the sidebar, the tab
+bar, and panel controls.
 
 Notes:
 
@@ -127,7 +141,10 @@ Notes:
   partial because of permissions or a size cap. Table search is
   diacritic-insensitive, so `zakaznici` finds `zákazníci`.
 - Jumping to a table from a namespace you never expanded opens it in the main
-  panel; the sidebar tree is left as it was.
+  panel and leaves the sidebar as it was. Press `g` `r` (or run *Reveal the open
+  table in the tree*) to expand the tree down to it.
+- While the tree has focus, `g` starts a tree motion (`gg`), so the `g`
+  sequences above are for use elsewhere in the window.
 - Digit chords match the physical key, so `Mod+1` works on layouts whose number
   row needs `Shift` for digits (Czech, AZERTY).
 - Window and clipboard shortcuts (`Mod+W`, `Mod+Q`, `Mod+C`/`V`/`X`/`A`) are
@@ -135,23 +152,71 @@ Notes:
 
 ## Row preview
 
-Selecting a table loads the first page of rows alongside the schema and partition spec. The preview panel offers a filter bar, a page-size selector (100 / 250 / 500), client-side prev/next navigation over the loaded buffer, and a **Load more** button to append the next page.
+Selecting a table loads the first page of rows alongside the schema and partition spec. The preview panel offers a filter bar, sortable columns, a page-size selector (100 / 250 / 500), client-side prev/next navigation over the loaded buffer, a **Load more** button to append the next page, and CSV/JSON export.
 
 Transient errors during refresh, filter changes, or **Load more** appear as toasts in the bottom-right corner — the previously-loaded rows stay visible so you can retry without losing the buffer. Errors on the first load (no data yet) show inline with a retry button.
 
 ### Filters
 
-Filters are pushed down to the iceberg-go scan (server-side). Multiple filters are AND-combined.
+Filters are pushed down to the iceberg-go scan (server-side), so they apply to
+the whole table rather than to the page on screen.
 
-| Type                                | Supported operators                                 |
-|-------------------------------------|-----------------------------------------------------|
-| numeric / date / timestamp / string | `=`, `≠`, `<`, `≤`, `>`, `≥`, `is null`, `not null` |
-| boolean                             | `=`, `≠`, `is null`, `not null`                     |
-| binary, struct, list, map           | not filterable                                      |
+| Type                                | Supported operators                                                        |
+|-------------------------------------|----------------------------------------------------------------------------|
+| numeric / date / timestamp / string | `=`, `≠`, `<`, `≤`, `>`, `≥`, `in`, `not in`, `is null`, `not null`        |
+| boolean                             | `=`, `≠`, `in`, `not in`, `is null`, `not null`                            |
+| struct fields (`addr.city`)         | as for the field's own type                                                |
+| binary, struct/list/map as a whole  | not filterable                                                             |
+
+- **`in` / `not in`** take a comma-separated list; newlines work as separators
+  too, and a trailing comma is ignored.
+- **Rows combine with `and` or `or`**, chosen per row. `and` binds tighter, as
+  in SQL: `a`, `and b`, `or c` means `(a AND b) OR c`.
+- **Nested fields** inside structs are offered by dotted path. Fields inside a
+  *list* or a *map* are not — an Iceberg predicate cannot reference a field
+  through a collection.
+- Filters are **remembered per table** for as long as the app is running, so
+  moving between tables and back keeps them. Any filter the new table cannot
+  answer (missing column, or an operator its type does not support) is dropped,
+  and you are told how many.
+
+Two things to know about how nested filters run: `iceberg-go` v0.6.0 cannot push
+a nested predicate into the scan (it loses the parent path and the scan fails),
+so fredfleet evaluates those rows itself over the returned data. Results are the
+same, but a nested filter cannot skip files — one that matches very few rows
+reads a lot of the table, bounded by the 60-second scan timeout.
 
 Not supported:
 - `starts with` / `CONTAINS` / `LIKE` / regex — `iceberg-go` builds the per-record filter via Arrow's substrait evaluator, which has no scalar mapping for `starts_with` (still true on v0.6.0). We surface it as a filter error and hide the operator from the UI; revisit when `arrow-go` ships the mapping.
-- `IN` / `NOT IN`, OR-combining, filtering on nested fields, sorting — deliberately out of scope, see [`DESIGN.md`](DESIGN.md).
+
+### Sorting
+
+Click a column header to sort ascending, again for descending, again to return
+to scan order. Nulls sort last either way.
+
+**The sort covers the rows you have loaded, not the whole table.** Iceberg scans
+return rows in file order and there is no `ORDER BY` to push into one, so
+sorting 100 loaded rows of a million-row table tells you about those 100 rows.
+The status line says so whenever a sort is active, and **Load more** keeps
+appending in scan order underneath it.
+
+Tables over 150 rows render through a windowed list, so a 500-row page (or a
+buffer grown by **Load more**) scrolls without laying out every row.
+
+### Export
+
+The **Export…** menu in the filter bar writes the rows matching your current
+filters to a file you choose, as CSV or JSON — either just the rows loaded so
+far, or every matching row in the table.
+
+- The export **re-scans** rather than dumping what is on screen, so numbers keep
+  their exact values and "all matching rows" really is all of them. A large
+  export runs up to 10 minutes and can be cancelled.
+- Rows come out in scan order; a column sort applied in the UI is **not**
+  reflected in the file.
+- CSV has no null, so a null and an empty string are both an empty field, and
+  structs/lists/maps are written as JSON text inside the cell. Export JSON if
+  either matters.
 
 ### Pagination model
 
@@ -160,6 +225,7 @@ Each fetch is **scan-and-discard**: the server iterates the Arrow stream from ro
 - The single hard upper bound is the per-call timeout (60 seconds). A scan that can't reach `skip + pageSize` rows in time will surface a timeout.
 - Switching the page-size selector to a value that fits in the already-loaded buffer is purely client-side (no fetch). Switching to a larger value triggers a fresh fetch from `skip = 0`.
 - Filter changes always reset the buffer and refetch from `skip = 0`.
+- Paging works by rescanning and discarding, which only lines up if two scans agree on row order — they do not by default, so preview scans read data files one at a time. Tables spread over many files scan a little slower in exchange for **Load more** never repeating or skipping a row.
 
 ## Scope
 

@@ -16,11 +16,15 @@ const defaultPreviewLimit = 100
 
 // BuildPreviewRows scans t and returns up to `limit` rows starting at offset
 // `skip`, in JSON-friendly form. It uses ToArrowRecords (streaming) so memory
-// stays bounded by batch size, not by full table size. The scan is capped at
-// skip+limit+1 rows; the trailing probe row is dropped from the result and
-// flips HasMore to true so the caller knows another page is available.
-// filters are AND-combined and pushed down server-side; an empty list
-// short-circuits to AlwaysTrue inside table.WithRowFilter.
+// stays bounded by batch size, not by full table size. The trailing probe row
+// read past the requested limit is dropped from the result and flips HasMore
+// to true so the caller knows another page is available.
+//
+// filters are combined per PreviewFilterDTO.Join and pushed down server-side;
+// an empty list short-circuits to AlwaysTrue inside table.WithRowFilter. A
+// filter on a nested field cannot be pushed down (see residual.go) and is
+// applied here instead, which costs the scan its row limit: the loop keeps
+// pulling batches until the page is full, bounded by ctx.
 func BuildPreviewRows(ctx context.Context, t *table.Table, skip, limit int, filters []PreviewFilterDTO) (dto *PreviewRowsDTO, err error) {
 	// iceberg-go's scanner contains paths that panic on edge cases
 	// (e.g. visitors.go:183, evaluators.go:1035). In a Wails/WebKit
@@ -40,51 +44,34 @@ func BuildPreviewRows(ctx context.Context, t *table.Table, skip, limit int, filt
 		skip = 0
 	}
 
-	expr, err := BuildRowFilter(t.Schema(), filters)
+	var (
+		rows      = make([]map[string]any, 0, limit)
+		discarded int
+		hasMore   bool
+	)
+
+	// One row past the page is read on purpose: it is what tells the caller a
+	// Load-more would return something, without a second round trip.
+	budget := int64(skip + limit + 1)
+	arrowSchema, err := streamRows(ctx, t, filters, budget, nil, func(next rowFunc) bool {
+		if discarded < skip {
+			discarded++
+			return true
+		}
+		if len(rows) >= limit {
+			hasMore = true
+			return false
+		}
+		rows = append(rows, next())
+		return true
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	scan := t.Scan(table.WithLimit(int64(skip+limit+1)), table.WithRowFilter(expr))
-	arrowSchema, itr, err := scan.ToArrowRecords(ctx)
-	if err != nil {
-		return nil, err
-	}
-
+	// Columns come from the scan's schema rather than from a batch, so an empty
+	// result still carries them — otherwise the filter bar would have nothing
+	// to offer and the user could not undo the filter that emptied the table.
 	cols := buildPreviewColumns(t.Schema(), arrowSchema)
-	rows := make([]map[string]any, 0, limit)
-	discarded := 0
-	hasMore := false
-
-outer:
-	for batch, ierr := range itr {
-		if ierr != nil {
-			if batch != nil {
-				batch.Release()
-			}
-			return nil, ierr
-		}
-		schema := batch.Schema()
-		nrows := int(batch.NumRows())
-		for r := range nrows {
-			if discarded < skip {
-				discarded++
-				continue
-			}
-			if len(rows) >= limit {
-				hasMore = true
-				batch.Release()
-				break outer
-			}
-			row := make(map[string]any, batch.NumCols())
-			for c := 0; c < int(batch.NumCols()); c++ {
-				name := schema.Field(c).Name
-				row[name] = arrowValueToJSON(batch.Column(c), r, schema.Field(c).Type)
-			}
-			rows = append(rows, row)
-		}
-		batch.Release()
-	}
 
 	return &PreviewRowsDTO{
 		Columns:  cols,
@@ -92,6 +79,106 @@ outer:
 		RowCount: len(rows),
 		HasMore:  hasMore,
 	}, nil
+}
+
+// rowFunc materialises the current row as JSON-friendly values. It is handed to
+// the callback rather than called up front so a row that is only being counted
+// (skipped, or the trailing probe row) costs nothing to convert.
+type rowFunc func() map[string]any
+
+// streamRows scans t with filters applied and calls fn once per matching row,
+// in scan order, until fn returns false or the scan is exhausted. It is the
+// single scan path behind both the preview and the export.
+//
+// budget caps how many rows the *scan* itself produces; pass 0 for no cap. The
+// cap can only be applied when the whole filter list was pushed down, because
+// a residual pass rejects rows after the scan has already counted them — with
+// residuals in play the loop has to keep pulling batches until fn says stop.
+// It returns the scan's Arrow schema, which is available even when no row
+// matched. prepare, if non-nil, is called with that schema before the first
+// row — the column order an export writes its header in comes from there,
+// since a row is a map and has no order of its own.
+func streamRows(
+	ctx context.Context,
+	t *table.Table,
+	filters []PreviewFilterDTO,
+	budget int64,
+	prepare func(*arrow.Schema) error,
+	fn func(next rowFunc) bool,
+) (*arrow.Schema, error) {
+	plan, err := BuildRowFilter(t.Schema(), filters)
+	if err != nil {
+		return nil, err
+	}
+
+	opts := []table.ScanOption{
+		table.WithRowFilter(plan.Pushdown),
+		// Pagination is scan-and-discard: page N rescans from row 0 and drops
+		// the first `skip` rows. That is only sound if two scans of the same
+		// snapshot hand back rows in the same order — and by default they do
+		// not. iceberg-go fans file reads out across GOMAXPROCS workers and
+		// emits batches in completion order (table/arrow_scanner.go:833), so on
+		// a table of more than one data file the order varies from call to
+		// call, and "Load more" can repeat rows the previous page already
+		// showed while skipping others outright. One worker costs file-level
+		// parallelism and buys a stable order.
+		//
+		// (`Wit` is upstream's spelling, not a typo here.)
+		table.WitMaxConcurrency(1),
+	}
+	if budget > 0 && plan.Residual.Empty() {
+		opts = append(opts, table.WithLimit(budget))
+	}
+
+	arrowSchema, itr, err := t.Scan(opts...).ToArrowRecords(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if prepare != nil {
+		if err := prepare(arrowSchema); err != nil {
+			return nil, err
+		}
+	}
+
+	for batch, ierr := range itr {
+		if ierr != nil {
+			if batch != nil {
+				batch.Release()
+			}
+			return nil, ierr
+		}
+		matcher, merr := plan.Residual.compile(batch)
+		if merr != nil {
+			batch.Release()
+			return nil, merr
+		}
+		schema := batch.Schema()
+		ncols := int(batch.NumCols())
+		for r := range int(batch.NumRows()) {
+			if !matcher.match(r) {
+				continue
+			}
+			if !fn(func() map[string]any {
+				row := make(map[string]any, ncols)
+				for c := range ncols {
+					f := schema.Field(c)
+					row[f.Name] = arrowValueToJSON(batch.Column(c), r, f.Type)
+				}
+				return row
+			}) {
+				batch.Release()
+				return arrowSchema, nil
+			}
+		}
+		batch.Release()
+		// A residual scan is the one path here that can run for minutes on a
+		// table where nothing matches; give the caller's cancellation a chance
+		// to land between batches rather than only inside the scan.
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
+	return arrowSchema, nil
 }
 
 func buildPreviewColumns(iceSchema *iceberg.Schema, arrowSchema *arrow.Schema) []PreviewColumnDTO {

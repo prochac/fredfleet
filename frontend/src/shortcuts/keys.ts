@@ -78,6 +78,18 @@ export function matches(e: KeyboardEvent, spec: KeySpec): boolean {
     return false;
 }
 
+/**
+ * A key sequence typed one key after another, vim-style: `g` then `t`.
+ *
+ * Chords carry no modifier — that is the point of them — so they only fire
+ * when focus is not in a text field, and the dispatcher gives up on a
+ * half-typed one after CHORD_TIMEOUT_MS rather than leaving the keyboard in a
+ * mode the user cannot see.
+ */
+export type ChordSpec = KeySpec[];
+
+export const CHORD_TIMEOUT_MS = 1500;
+
 const CODE_LABELS: Record<string, string> = {
     Comma: ',',
     Digit0: '0',
@@ -104,4 +116,13 @@ export function formatShortcut(spec: KeySpec): string[] {
     if (spec.shift === true) parts.push(mac ? '⇧' : 'Shift');
     parts.push(keyLabel(spec));
     return parts;
+}
+
+/**
+ * Renders a sequence as one token per step — ['G', 'T'] for `g` then `t`.
+ * The help dialog joins them with "then" rather than "+", because pressing
+ * them together is exactly what does *not* work.
+ */
+export function formatChord(chord: ChordSpec): string[] {
+    return chord.map((spec) => formatShortcut(spec).join('+'));
 }

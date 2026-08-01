@@ -1,12 +1,17 @@
 import {COMMANDS, COMMAND_GROUPS, type CommandGroup} from '../shortcuts/commands';
-import {formatShortcut} from '../shortcuts/keys';
+import {formatChord, formatShortcut} from '../shortcuts/keys';
 import {Modal} from './Modal';
 
 type Props = {
     onClose: () => void;
 };
 
-type Hint = {keys: string[][]; description: string};
+/**
+ * One row. `keys` holds alternative bindings; each is a list of <kbd> tokens.
+ * `chords` holds sequences, rendered with "then" between the steps because
+ * pressing them together is exactly what does not work.
+ */
+type Hint = {keys: string[][]; chords?: string[][]; description: string};
 
 /**
  * Rows that describe built-in widget behaviour rather than a registered
@@ -15,11 +20,20 @@ type Hint = {keys: string[][]; description: string};
  * so the dialog and the dispatcher cannot drift apart.
  */
 const TREE_HINTS: Hint[] = [
-    {keys: [['↑'], ['↓']], description: 'Move between visible rows'},
-    {keys: [['→']], description: 'Expand namespace, or move to first child'},
-    {keys: [['←']], description: 'Collapse namespace, or move to parent'},
-    {keys: [['Home'], ['End']], description: 'Jump to first / last visible row'},
+    {keys: [['↑'], ['↓'], ['J'], ['K']], description: 'Move between visible rows'},
+    {keys: [['→'], ['L']], description: 'Expand namespace, or move to first child'},
+    {keys: [['←'], ['H']], description: 'Collapse namespace, or move to parent'},
+    {
+        keys: [['Home'], ['End'], ['Shift', 'G']],
+        chords: [['G', 'G']],
+        description: 'Jump to first / last visible row',
+    },
     {keys: [['Enter'], ['Space']], description: 'Toggle a namespace, or open a table'},
+    {
+        keys: [],
+        description:
+            'While the tree has focus, G starts a tree motion — the G sequences below are for elsewhere',
+    },
 ];
 
 const TABS_HINTS: Hint[] = [
@@ -33,8 +47,11 @@ const FOCUS_HINTS: Hint[] = [
 ];
 
 function commandHints(group: CommandGroup): Hint[] {
-    return COMMANDS.filter((c) => c.group === group && c.keys.length > 0).map((c) => ({
+    return COMMANDS.filter(
+        (c) => c.group === group && (c.keys.length > 0 || (c.chords?.length ?? 0) > 0),
+    ).map((c) => ({
         keys: c.keys.map(formatShortcut),
+        chords: c.chords?.map(formatChord),
         description: c.title,
     }));
 }
@@ -79,6 +96,19 @@ function Section({title, items}: {title: string; items: Hint[]}) {
                                     {i > 0 && <span className="kbd-or"> / </span>}
                                     {combo.map((k) => (
                                         <kbd key={k}>{k}</kbd>
+                                    ))}
+                                </span>
+                            ))}
+                            {(s.chords ?? []).map((chord, i) => (
+                                <span key={'chord-' + chord.join('-')}>
+                                    {(i > 0 || s.keys.length > 0) && (
+                                        <span className="kbd-or"> / </span>
+                                    )}
+                                    {chord.map((step, j) => (
+                                        <span key={step + j}>
+                                            {j > 0 && <span className="kbd-then"> then </span>}
+                                            <kbd>{step}</kbd>
+                                        </span>
                                     ))}
                                 </span>
                             ))}
