@@ -15,7 +15,7 @@ concurrency:
 
 env:
   WAILS_VERSION: v2.13.0
-  NODE_VERSION: '20'
+  NODE_VERSION: '24'
   GOLANGCI_VERSION: v2.12.2
 
 jobs:

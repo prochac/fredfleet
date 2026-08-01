@@ -3,7 +3,11 @@ import {Environment} from '../../wailsjs/runtime/runtime';
 export type Platform = 'darwin' | 'linux' | 'windows';
 
 function guessPlatform(): Platform {
-    const ua = navigator.userAgent;
+    // `navigator` is a given in the webview, but not under vitest's default
+    // node environment: the global only exists from Node 21 on, so a test that
+    // imports this module without stubbing it throws at module load on older
+    // runtimes. Fall through to the 'linux' default instead.
+    const ua = typeof navigator === 'undefined' ? '' : navigator.userAgent;
     if (/Mac|iPhone|iPad|iPod/.test(ua)) return 'darwin';
     if (/Win/.test(ua)) return 'windows';
     return 'linux';
