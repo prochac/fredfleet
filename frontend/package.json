@@ -10,7 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@tanstack/react-table": "^8.20.0",
+    "@tanstack/react-table": "^9.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "sonner": "^2.0.7"
