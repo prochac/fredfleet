@@ -7,7 +7,7 @@ require (
 	github.com/apache/iceberg-go v0.6.0
 	github.com/wailsapp/wails/v2 v2.13.0
 	github.com/zalando/go-keyring v0.2.8
-	golang.org/x/text v0.40.0
+	golang.org/x/text v0.41.0
 )
 
 require (
