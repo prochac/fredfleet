@@ -711,7 +711,7 @@ demand:
   bindings, which are gitignored), then `npm ci`, `vitest`, and `npm run build`
   — the same `tsc && vite build` that `wails build` shells out to, so a type
   error fails here instead of at release time.
-- **build** — `wails build` on `ubuntu-24.04`, `macos-14` and `windows-2022`,
+- **build** — `wails build` on `ubuntu-24.04`, `macos-15` and `windows-2022`,
   gated on the two above. This is the only continuous evidence that the macOS
   and Windows legs compile, since the app has only ever been *run* on Linux.
 
