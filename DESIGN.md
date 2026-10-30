@@ -225,7 +225,9 @@ sees it: in the app it is a crash, not an error.
 Pushing down just the shapes that survive was considered and declined. It keeps
 all of `residual.go` (the crashing shapes still need it), adds a third planning
 rule, and makes every mistake in that rule fatal — for a gain that is purely
-performance. So the rule below is unchanged from v0.6.0.
+performance. So the rule below is unchanged from v0.6.0. The probe matrix, stack
+and a reproducer are in
+[`docs/upstream/nested-same-field-crash.md`](docs/upstream/nested-same-field-crash.md).
 
 Rather than refuse the feature or fork upstream, `BuildRowFilter` splits the
 list into a **`FilterPlan`**: the part iceberg-go can evaluate during the scan,
