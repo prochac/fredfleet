@@ -37,7 +37,7 @@ func TestBuildRowFilter_Empty(t *testing.T) {
 // substrait evaluator has no starts_with mapping, so the scan would fail deep
 // inside arrow_scanner.go. The UI hides the operator; this guards the backend
 // message in case something else sends it. That the gap is still real on
-// v0.6.0 is proven separately by TestStartsWithStillUnsupportedUpstream.
+// v0.7.0 is proven separately by TestStartsWithStillUnsupportedUpstream.
 func TestBuildRowFilter_StartsRejected(t *testing.T) {
 	for _, field := range []string{"id", "name"} {
 		_, err := BuildRowFilter(testSchema(), []PreviewFilterDTO{

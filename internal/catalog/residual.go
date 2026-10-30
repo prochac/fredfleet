@@ -13,18 +13,21 @@ import (
 // cannot evaluate during the scan, so we evaluate it here, row by row, over the
 // Arrow batches the scan hands back.
 //
-// Only one thing lands here today: a predicate on a *nested* field. When
-// iceberg-go lowers a bound expression to substrait it rebuilds the column
-// reference from the leaf name alone —
+// Only one thing lands here today: a predicate on a *nested* field. Up to
+// iceberg-go v0.6.0 no nested predicate could be pushed down at all — lowering
+// to substrait rebuilt the column reference from the leaf name, so `addr.city`
+// was re-bound as `city` and the scan died with "could not bind reference".
 //
-//	table/substrait/substrait.go:318:
-//	    updatedRef, err := iceberg.Reference(ref.Field().Name).Bind(...)
-//
-// — so a predicate on `addr.city` is re-bound as `city`, which no top-level
-// schema has, and the scan fails during *iteration* with
-// "invalid schema: could not bind reference 'city'". Every nested operator
-// except IsNull dies this way on v0.6.0; TestNestedPushdownStillBrokenUpstream
-// pins that and will start failing the day upstream fixes it.
+// v0.7.0 fixed that, and a lone nested predicate now scans correctly. But two
+// predicates on the *same* nested field — a range, `!= a AND != b`, even
+// `NotNull OR = x` — panic inside arrow-go's struct take kernel ("string offset
+// buffer must have at least N values", or an index out of range for ints).
+// The panic is on an arrow-go worker goroutine, so no recover reaches it: in
+// the app it is a crash, not an error. Pushing down only the shapes that
+// survive would need a third planning rule whose every mistake is fatal, for a
+// gain that is only performance, so every nested predicate stays here.
+// TestNestedPushdownStillBrokenUpstream pins the crash and will start failing
+// the day upstream fixes it.
 //
 // The cost of evaluating here rather than in the scan is that a nested
 // predicate no longer prunes files or row groups: BuildPreviewRows has to keep

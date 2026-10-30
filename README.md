@@ -170,6 +170,8 @@ the whole table rather than to the page on screen.
 
 - **`in` / `not in`** take a comma-separated list; newlines work as separators
   too, and a trailing comma is ignored.
+- **Null never matches a comparison.** `≠ x` and `not in (…)` skip rows where
+  the value is null, as in SQL; use `is null` to find those.
 - **Rows combine with `and` or `or`**, chosen per row. `and` binds tighter, as
   in SQL: `a`, `and b`, `or c` means `(a AND b) OR c`.
 - **Nested fields** inside structs are offered by dotted path. Fields inside a
@@ -180,14 +182,15 @@ the whole table rather than to the page on screen.
   answer (missing column, or an operator its type does not support) is dropped,
   and you are told how many.
 
-Two things to know about how nested filters run: `iceberg-go` v0.6.0 cannot push
-a nested predicate into the scan (it loses the parent path and the scan fails),
-so fredfleet evaluates those rows itself over the returned data. Results are the
+Two things to know about how nested filters run: fredfleet does not push a
+nested predicate into the scan — on `iceberg-go` v0.7.0 two conditions on the
+same nested field crash the scanner — so it evaluates those rows itself over the
+returned data. Results are the
 same, but a nested filter cannot skip files — one that matches very few rows
 reads a lot of the table, bounded by the 60-second scan timeout.
 
 Not supported:
-- `starts with` / `CONTAINS` / `LIKE` / regex — `iceberg-go` builds the per-record filter via Arrow's substrait evaluator, which has no scalar mapping for `starts_with` (still true on v0.6.0). We surface it as a filter error and hide the operator from the UI; revisit when `arrow-go` ships the mapping.
+- `starts with` / `CONTAINS` / `LIKE` / regex — `iceberg-go` builds the per-record filter via Arrow's substrait evaluator, which has no scalar mapping for `starts_with` (still true on v0.7.0). We surface it as a filter error and hide the operator from the UI; revisit when `arrow-go` ships the mapping.
 
 ### Sorting
 
@@ -239,7 +242,7 @@ Each fetch is **scan-and-discard**: the server iterates the Arrow stream from ro
 
 - Go 1.26+ (matches `go.mod`)
 - Node.js 20+ / npm
-- [Wails CLI v2.13.0](https://wails.io/docs/gettingstarted/installation): `go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0`
+- [Wails CLI v2.17.0](https://wails.io/docs/gettingstarted/installation): `go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.0`
 - Platform deps for Wails (run `wails doctor` to check):
   - **Linux**: WebKit2GTK 4.1, GTK 3, libgcc, pkg-config — on Arch: `sudo pacman -S webkit2gtk-4.1 gtk3`; on Debian/Ubuntu 24.04+: `sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev pkg-config`
   - **macOS**: Xcode command-line tools
@@ -272,7 +275,7 @@ golangci-lint run              # https://golangci-lint.run, config in .golangci.
 
 CI runs all three plus a `wails build` on Linux, macOS and Windows for every push and pull request.
 
-**On Linux (Arch and other distros that ship webkit2gtk-4.1):** add `-tags webkit2_41`. Wails 2.13 still defaults to the older 4.0 ABI.
+**On Linux (Arch and other distros that ship webkit2gtk-4.1):** add `-tags webkit2_41`. Wails 2.17 still defaults to the older 4.0 ABI.
 
 ```bash
 wails dev   -tags webkit2_41

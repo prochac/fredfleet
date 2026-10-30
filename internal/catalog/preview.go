@@ -122,9 +122,7 @@ func streamRows(
 		// call, and "Load more" can repeat rows the previous page already
 		// showed while skipping others outright. One worker costs file-level
 		// parallelism and buys a stable order.
-		//
-		// (`Wit` is upstream's spelling, not a typo here.)
-		table.WitMaxConcurrency(1),
+		table.WithMaxConcurrency(1),
 	}
 	if budget > 0 && plan.Residual.Empty() {
 		opts = append(opts, table.WithLimit(budget))

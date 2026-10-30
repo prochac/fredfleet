@@ -48,11 +48,11 @@ func BuildRowFilter(schema *iceberg.Schema, filters []PreviewFilterDTO) (FilterP
 		return empty, err
 	}
 
-	// A nested reference cannot be pushed down at all: iceberg-go rebuilds the
-	// reference from the *leaf* name when it lowers the expression to substrait
-	// (table/substrait/substrait.go:318), so `addr.city` is re-bound as `city`
-	// and the scan dies mid-iteration with "could not bind reference". See
-	// ResidualFilter.
+	// A nested reference is never pushed down. A lone predicate on one would
+	// scan fine since iceberg-go v0.7.0, but two on the *same* nested field
+	// (a range, `!= a AND != b`, even `NotNull OR =`) panic on an arrow-go
+	// worker goroutine, which no recover reaches and which takes the whole
+	// app down. See ResidualFilter.
 	if !anyNested(groups) {
 		expr, err := pushdownExpr(groups)
 		if err != nil {
@@ -173,13 +173,13 @@ func parseOne(schema *iceberg.Schema, f PreviewFilterDTO) (parsedFilter, error) 
 		// iceberg-go builds the per-record filter via Arrow's substrait
 		// expression evaluator, which has no scalar mapping for
 		// `starts_with`. The scan would fail with "not implemented:
-		// starts_with" deep inside arrow_scanner.go. Still true on v0.6.0 —
+		// starts_with" deep inside arrow_scanner.go. Still true on v0.7.0 —
 		// verified by scanning a string column with iceberg.StartsWith
 		// against the local fixture. The gap is in Arrow's evaluator, not in
 		// iceberg-go's substrait mapping (table/substrait emits starts_with
 		// fine), so revisit when arrow-go's exprs extension set implements
 		// it.
-		return parsedFilter{}, fmt.Errorf("%w: operator %q is not supported by iceberg-go v0.6.0", ErrFilter, f.Op)
+		return parsedFilter{}, fmt.Errorf("%w: operator %q is not supported by iceberg-go v0.7.0", ErrFilter, f.Op)
 	case "eq", "neq", "lt", "lte", "gt", "gte", "in", "notin":
 		// Validate the operand(s) now so a bad value is reported against the
 		// row that carries it, whichever half of the plan it ends up in.
@@ -371,7 +371,13 @@ func setPredicate[T iceberg.LiteralType](
 		vals = append(vals, v)
 	}
 	if notIn {
-		return iceberg.NotIn(ref, vals...), nil
+		// iceberg-go lets a null through NOT IN (Arrow's is_in is false on a
+		// null and the NOT flips it), while NotEqualTo drops one. ANDing in
+		// NotNull gives NOT IN the SQL answer — a null is not "not in"
+		// anything — so it agrees with neq and with the residual pass.
+		// TestNotInExcludesNulls pins it. Only top-level fields come through
+		// here; on a nested one this very AND is a shape that crashes.
+		return iceberg.NewAnd(iceberg.NotIn(ref, vals...), iceberg.NotNull(ref)), nil
 	}
 	return iceberg.IsIn(ref, vals...), nil
 }

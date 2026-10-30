@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  WAILS_VERSION: v2.13.0
+  WAILS_VERSION: v2.17.0
   NODE_VERSION: '24'
   GOLANGCI_VERSION: v2.12.2
 

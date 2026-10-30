@@ -206,13 +206,26 @@ Three decisions worth keeping:
 
 #### Nested-field filters, and the residual pass
 
-A predicate on a field inside a struct (`addr.city`) **cannot be pushed down**
-on iceberg-go v0.6.0. Lowering a bound expression to substrait rebuilds the
-column reference from its leaf name alone —
-`table/substrait/substrait.go:318` — so `addr.city` is re-bound as `city`, which
-no top-level schema has, and the scan dies *during iteration* with
-`invalid schema: could not bind reference 'city'`. Every nested operator except
-`IsNull` fails this way.
+A predicate on a field inside a struct (`addr.city`) **is never pushed down.**
+On iceberg-go v0.6.0 it could not be: lowering a bound expression to substrait
+rebuilt the column reference from its leaf name alone, so `addr.city` was
+re-bound as `city` and the scan died *during iteration* with
+`invalid schema: could not bind reference 'city'`.
+
+v0.7.0 fixed the binding, and a lone nested predicate now scans correctly —
+checked operator by operator against the residual pass on the many-file
+fixture. But **two predicates on the same nested field** — a range
+(`city >= a AND city < c`), `!= a AND != b`, even `NotNull OR = x` — panic
+inside arrow-go's struct `take` kernel ("string offset buffer must have at least
+N values", or an index out of range on an int field). Predicates on *different*
+fields of one struct are fine, and top-level fields are unaffected. The panic is
+on an arrow-go worker goroutine, so the `recover()` in `BuildPreviewRows` never
+sees it: in the app it is a crash, not an error.
+
+Pushing down just the shapes that survive was considered and declined. It keeps
+all of `residual.go` (the crashing shapes still need it), adds a third planning
+rule, and makes every mistake in that rule fatal — for a gain that is purely
+performance. So the rule below is unchanged from v0.6.0.
 
 Rather than refuse the feature or fork upstream, `BuildRowFilter` splits the
 list into a **`FilterPlan`**: the part iceberg-go can evaluate during the scan,
@@ -239,8 +252,9 @@ nested filter matching nothing reads the whole table. It stays bounded by the
 same 60 s timeout and `CancelRequest` path as any other slow scan.
 
 `TestNestedPushdownStillBrokenUpstream` pins the upstream gap against a live
-fixture scan and will fail the day it is fixed — that is the signal to delete
-the residual pass.
+fixture scan — in a child copy of the test binary, since the panic would
+otherwise take the test process with it — and will fail the day the child
+survives. That is the signal to delete the residual pass.
 
 #### Pagination
 
@@ -256,7 +270,7 @@ across `GOMAXPROCS` workers and emits batches as they complete
 varies from call to call, so "Load more" could repeat rows the previous page had
 already shown while skipping others outright — on a single-file table, which is
 what the original fixtures were, the bug is invisible. `BuildPreviewRows`
-therefore pins the scan to one worker with `table.WitMaxConcurrency(1)`
+therefore pins the scan to one worker with `table.WithMaxConcurrency(1)`
 (upstream's spelling), trading file-level parallelism for a stable order.
 `TestScanOrderIsStableAcrossCalls` and `TestLoadMoreAcrossManyDataFiles` pin it.
 
@@ -423,8 +437,8 @@ would imply otherwise.
 
 Row windowing is hand-rolled (`state/virtual.ts` + `hooks/useVirtualRows.ts`)
 rather than pulled from a library: the table is a fixed-row-height list in one
-scroller, which is the case windowing is trivial for, and TypeScript is pinned
-at 4.6, which cannot parse the `.d.ts` files current virtualizer packages ship.
+scroller, which is the case windowing is trivial for, and TypeScript is held
+on 4.x, which cannot parse the `.d.ts` files current virtualizer packages ship.
 Row height is applied inline from the same constant the maths uses, so the two
 cannot drift. Below 150 rows nothing is windowed — the spacer rows would cost
 more than they save, and plain rows keep text selection working across the whole
@@ -540,7 +554,7 @@ included.
 
 ---
 
-## Constraints imposed by `iceberg-go` v0.6.0
+## Constraints imposed by `iceberg-go` v0.7.0
 
 These shape the design more than any internal decision does. All of them are
 upstream; none is worked around by forking, because this project deliberately
@@ -553,16 +567,14 @@ does not maintain an `iceberg-go` fork.
   naming the upstream gap. No LIKE, CONTAINS or regex either. The gap is on
   Arrow's side, not `iceberg-go`'s — `table/substrait` emits the `starts_with`
   extension reference fine, and always did; nothing consumes it. Re-verified
-  against v0.6.0 by `TestStartsWithStillUnsupportedUpstream`, which scans a
+  against v0.7.0 by `TestStartsWithStillUnsupportedUpstream`, which scans a
   string column with a real `iceberg.StartsWith` filter and asserts the
   failure, so the day `arrow-go` implements the mapping the test fails and
   tells us to delete the rejection.
-- **No pushdown for a nested field.** Lowering an expression to substrait
-  rebuilds the column reference from its leaf name
-  (`table/substrait/substrait.go:318`), so a predicate on `addr.city` is
-  re-bound as `city` and the scan fails mid-iteration with
-  `could not bind reference`. Every nested operator except `IsNull` fails this
-  way. Worked around at the boundary by the
+- **No safe pushdown for a nested field.** Two predicates on the same nested
+  field panic inside arrow-go on a goroutine nothing can recover, killing the
+  process (until v0.6.0, *any* nested predicate failed with
+  `could not bind reference`). Worked around at the boundary by the
   [residual pass](#nested-field-filters-and-the-residual-pass) rather than
   refused; `TestNestedPushdownStillBrokenUpstream` will fail when upstream
   fixes it.
@@ -572,7 +584,7 @@ does not maintain an `iceberg-go` fork.
   (`table/arrow_scanner.go:833`), so two scans of one snapshot can order rows
   differently — which silently breaks scan-and-discard paging on any table of
   more than one data file. Pinned to one worker with
-  `table.WitMaxConcurrency(1)` in `BuildPreviewRows`, at the cost of file-level
+  `table.WithMaxConcurrency(1)` in `BuildPreviewRows`, at the cost of file-level
   parallelism.
 - **The scanner re-binds `rowFilter` unconditionally** and panics on an
   already-bound predicate — hence the unbound expression from `BuildRowFilter`,
@@ -663,7 +675,8 @@ What the executable proofs cover:
 | `TestScanOrderIsStableAcrossCalls`         | The premise every pagination test rests on, on a *many-file* fixture: four scans return rows in the same order. Fails if the one-worker pin is removed, which is what makes the paging bug it prevents visible                                             |
 | `TestLoadMoreAcrossManyDataFiles`          | Load-more tiles a 120-row, 11-file table with no repeat and no gap — the case the single-file fixtures could not exercise                                                                                                                                  |
 | `TestAndBindsTighterThanOr`                | Filter-row precedence, against a fixture where `(a AND b) OR c` and `a AND (b OR c)` return different rows                                                                                                                                                 |
-| `TestNestedPushdownStillBrokenUpstream`    | Why `residual.go` exists: a real nested-field scan still dies with `could not bind reference`. The signal to delete the residual pass                                                                                                                      |
+| `TestNestedPushdownStillBrokenUpstream`    | Why `residual.go` exists: a range on a nested field still crashes the scanning process (run in a child process). The signal to delete the residual pass                                                                                                  |
+| `TestNotInExcludesNulls`                   | `NOT IN` drops nulls on a top-level column (the `NotNull` that `buildSet` ANDs in) and on both kinds of absent nested value (the residual pass)                                                                                                            |
 | `TestNestedFilterMatchesAcrossBatches`     | The residual pass agrees with the fixture across several record batches (it is compiled per batch)                                                                                                                                                          |
 | `TestNestedNullSemantics`                  | Both ways a nested value goes missing — a null leaf and a null parent struct — count as null, and a comparison against null is false rather than a match                                                                                                    |
 | `TestNestedFilterFillsFullPage`            | A page comes back *full* and correctly offset under a residual filter, where the scan limit no longer bounds the result                                                                                                                                     |
@@ -739,7 +752,7 @@ shows a SmartScreen warning. Documented in the README rather than solved; code
 signing needs certificates this project does not have.
 
 Linux builds pass `-tags webkit2_41`. Wails still defaults to the webkit2gtk-4.0
-ABI as of 2.13, and distros that ship only 4.1 report "libwebkit Not Found"
+ABI as of 2.17, and distros that ship only 4.1 report "libwebkit Not Found"
 without it.
 
 `WAILS_VERSION` in the workflow pins the CLI that generates bindings and drives
@@ -754,14 +767,12 @@ against a runtime from another.
 Nothing here is code work. Everything left is a release action or a check that
 only a human can perform.
 
-- ⏳ **Publish.** The `origin` remote is empty — no branch has ever been pushed
-  and no tag cut, so neither workflow has ever run. Push `master`, let CI go
-  green, smoke the release pipeline via `workflow_dispatch`, then tag. The
-  macOS and Windows legs, artifact naming and the release step are all
-  unverified until then. GitHub's repo default branch must also be set to
-  `master`, or the CI push trigger never fires.
-- ⏳ **Packaged binary runs on a clean machine** with no Go toolchain — blocked
-  on the tag above.
+- ✅ **Publish.** `v0.1.0` was tagged on 2026-07-31; the release workflow
+  built all three legs and published `linux-amd64.tar.gz`,
+  `darwin-universal.zip` and `windows-amd64.zip`. The repo default branch is
+  `master`.
+- ⏳ **Packaged binary runs on a clean machine** with no Go toolchain. The
+  `v0.1.0` artifacts exist; nobody has launched one yet.
 - ⏳ **Dark mode follows a live OS change.** Flip the system setting with the app
   open and the preference on "system"; confirm a Light/Dark pin survives a
   restart. Inherently manual.

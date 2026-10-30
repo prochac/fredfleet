@@ -74,6 +74,10 @@ func fixtureSchema() (*iceberg.Schema, *arrow.Schema) {
 	return ice, arr
 }
 
+// fixtureNullTag, returned from a tagFor func, writes a null tag instead of a
+// string — the one way a top-level fixture cell can be null.
+const fixtureNullTag = "\x00null"
+
 // newFixtureTable creates an unpartitioned Iceberg table under t.TempDir() and
 // appends nrows rows in batches of batchRows (so the table gets several row
 // groups / data files rather than one). Row i has id=i, name="row-<i>", and
@@ -109,7 +113,11 @@ func newFixtureTable(t *testing.T, nrows, batchRows int, tagFor func(i int) stri
 		for i := start; i < end; i++ {
 			ids.Append(int64(i))
 			names.Append(fmt.Sprintf("row-%d", i))
-			tags.Append(tagFor(i))
+			if tag := tagFor(i); tag == fixtureNullTag {
+				tags.AppendNull()
+			} else {
+				tags.Append(tag)
+			}
 		}
 		rec := rb.NewRecordBatch()
 		at := array.NewTableFromRecords(arrSchema, []arrow.RecordBatch{rec})
@@ -156,7 +164,8 @@ func nestedCityIsNull(i int) bool { return !nestedAddrIsNull(i) && i%7 == 3 }
 func nestedCityOf(i int) string   { return fmt.Sprintf("city-%d", i%3) }
 
 // newNestedFixtureTable builds the nested-column fixture, in batches of
-// batchRows so the residual pass has to span several record batches.
+// batchRows, so the table is several data files and a filtered scan has to span
+// several record batches.
 func newNestedFixtureTable(t *testing.T, nrows, batchRows int) *table.Table {
 	t.Helper()
 	ctx := t.Context()

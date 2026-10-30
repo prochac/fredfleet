@@ -1,6 +1,8 @@
 package catalog
 
 import (
+	"os"
+	"os/exec"
 	"slices"
 	"strings"
 	"testing"
@@ -135,35 +137,44 @@ func TestUnknownJoinIsRejected(t *testing.T) {
 // TestNestedPushdownStillBrokenUpstream is the reason residual.go exists, and
 // the signal to delete it.
 //
-// iceberg-go rebuilds a column reference from its *leaf* name when lowering an
-// expression to substrait (table/substrait/substrait.go:318), so a predicate on
-// `addr.city` is re-bound as `city` and the scan dies during iteration. If this
-// test starts failing, upstream has fixed the reference rebuild and nested
-// predicates can go back to being pushed down.
+// Since iceberg-go v0.7.0 a lone nested predicate scans fine, but two on the
+// same nested field panic inside arrow-go's struct take kernel, on a worker
+// goroutine nothing can recover. The panic kills whichever process scans, so
+// the scan runs in a child copy of this test binary and the parent asserts
+// that the child died. If it starts failing, upstream has fixed it and nested
+// predicates can be pushed down again.
 func TestNestedPushdownStillBrokenUpstream(t *testing.T) {
-	tbl := newNestedFixtureTable(t, 20, 20)
-
-	scan := tbl.Scan(
-		table.WithLimit(100),
-		table.WithRowFilter(iceberg.EqualTo(iceberg.Reference("addr.city"), "city-1")),
-	)
-	_, itr, err := scan.ToArrowRecords(t.Context())
-	if err != nil {
-		t.Fatalf("ToArrowRecords failed early (%v); the gap may have moved", err)
-	}
-	for batch, ierr := range itr {
-		if batch != nil {
+	const probeEnv = "FREDFLEET_NESTED_PUSHDOWN_PROBE"
+	if os.Getenv(probeEnv) == "1" {
+		tbl := newNestedFixtureTable(t, 20, 20)
+		city := iceberg.Reference("addr.city")
+		scan := tbl.Scan(table.WithRowFilter(iceberg.NewAnd(
+			iceberg.GreaterThanEqual(city, "city-0"),
+			iceberg.LessThan(city, "city-2"),
+		)))
+		_, itr, err := scan.ToArrowRecords(t.Context())
+		if err != nil {
+			t.Fatalf("ToArrowRecords: %v", err)
+		}
+		for batch, ierr := range itr {
+			if ierr != nil {
+				t.Fatalf("scan: %v", ierr)
+			}
 			batch.Release()
 		}
-		if ierr != nil {
-			if strings.Contains(ierr.Error(), "could not bind reference") {
-				return // still broken upstream, as expected
-			}
-			t.Fatalf("scan failed with an unexpected error: %v", ierr)
-		}
+		return
 	}
-	t.Fatal("a nested-field filter now scans cleanly upstream — " +
-		"drop the residual pass in residual.go and push nested predicates down again")
+
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestNestedPushdownStillBrokenUpstream$", "-test.count=1")
+	cmd.Env = append(os.Environ(), probeEnv+"=1")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("a range on a nested field now scans cleanly upstream — " +
+			"drop the residual pass in residual.go and push nested predicates down again")
+	}
+	if !strings.Contains(string(out), "panic:") {
+		t.Fatalf("the probe failed, but not with the known panic; the gap may have moved:\n%s", out)
+	}
 }
 
 func TestNestedFilterMatchesAcrossBatches(t *testing.T) {
@@ -258,6 +269,51 @@ func TestNestedNullSemantics(t *testing.T) {
 			t.Fatalf("row %d has a null city but matched `city != city-0`", id)
 		}
 	}
+}
+
+// TestNotInExcludesNulls pins the SQL answer for NOT IN: a null is not "not
+// in" anything. iceberg-go on its own lets a null through NOT IN (though not
+// through !=), so BuildRowFilter ANDs in NotNull for a top-level column; the
+// residual pass already answers the same way for both kinds of absent nested
+// value.
+func TestNotInExcludesNulls(t *testing.T) {
+	ctx := t.Context()
+
+	top := newFixtureTable(t, 30, 7, func(i int) string {
+		if i%4 == 0 {
+			return fixtureNullTag
+		}
+		return string(rune('a' + i%3))
+	})
+	dto, err := BuildPreviewRows(ctx, top, 0, 100, []PreviewFilterDTO{
+		{Field: "tag", Op: "notin", Values: []any{"a", "c"}},
+	})
+	if err != nil {
+		t.Fatalf("top-level preview: %v", err)
+	}
+	want := []int64{}
+	for i := range int64(30) {
+		if i%4 != 0 && i%3 == 1 {
+			want = append(want, i)
+		}
+	}
+	assertIDs(t, rowIDs(t, dto), want)
+
+	const rows = 70
+	nested := newNestedFixtureTable(t, rows, 9)
+	dto, err = BuildPreviewRows(ctx, nested, 0, 100, []PreviewFilterDTO{
+		{Field: "addr.city", Op: "notin", Values: []any{"city-0", "city-2"}},
+	})
+	if err != nil {
+		t.Fatalf("nested preview: %v", err)
+	}
+	want = []int64{}
+	for i := range rows {
+		if !nestedAddrIsNull(i) && !nestedCityIsNull(i) && nestedCityOf(i) == "city-1" {
+			want = append(want, int64(i))
+		}
+	}
+	assertIDs(t, rowIDs(t, dto), want)
 }
 
 func TestNestedInFilter(t *testing.T) {
