@@ -9,7 +9,7 @@ import {windowRange, type RowWindow} from '../state/virtual';
  * changes.
  */
 export function useVirtualRows(
-    ref: RefObject<HTMLElement>,
+    ref: RefObject<HTMLElement | null>,
     rowCount: number,
     rowHeight: number,
     enabled: boolean,

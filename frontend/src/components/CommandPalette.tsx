@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useRef, useState, type KeyboardEvent} from 'react';
+import {useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement} from 'react';
 import {COMMANDS, type CommandDef} from '../shortcuts/commands';
 import {fuzzyMatch} from '../shortcuts/fuzzy';
 import {formatChord, formatShortcut} from '../shortcuts/keys';
@@ -233,7 +233,7 @@ function coverageText(
 function highlight(text: string, positions: number[]) {
     if (positions.length === 0) return text;
     const set = new Set(positions);
-    const out: (string | JSX.Element)[] = [];
+    const out: (string | ReactElement)[] = [];
     let run = '';
     let markRun = '';
 
