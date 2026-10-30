@@ -74,7 +74,7 @@ export function sortableValue(v: unknown): unknown {
     return v === null ? undefined : v;
 }
 
-/** compareValues in the shape TanStack's `sortingFn` option expects. */
+/** compareValues in the shape TanStack's `sortFn` column option expects. */
 export function previewSortingFn(
     rowA: {getValue: (id: string) => unknown},
     rowB: {getValue: (id: string) => unknown},
