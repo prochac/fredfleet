@@ -120,7 +120,7 @@ jobs:
             platform: linux/amd64
             tags: '-tags webkit2_41'
           - name: darwin/universal
-            os: macos-14
+            os: macos-15
             platform: darwin/universal
             tags: ''
           - name: windows/amd64
