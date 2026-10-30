@@ -23,9 +23,11 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     groups:
-      # Majors that only work in lockstep arrive as one PR each: vitest and
-      # @vitejs/plugin-react peer on a vite major, and React's types follow
-      # React. A lone major from either set fails CI by construction.
+      # Majors that only work in lockstep are bundled into one PR per set:
+      # vitest and @vitejs/plugin-react peer on a vite major, and React's types
+      # follow React. A group only bundles what is already published, so a
+      # vite major that ships before its plugin still arrives alone and fails
+      # CI; close it and wait for the next run.
       build-toolchain-major:
         patterns: [vite, '@vitejs/plugin-react', vitest]
         update-types: [major]

@@ -52,7 +52,7 @@ wails build -tags webkit2_41 -platform linux/amd64
 - `internal/connections/` — `Connection` type, JSON metadata store, OS keyring wrapper
 - `internal/catalog/` — `iceberg-go` REST probe + error→user-message mapping; `preview.go` holds `streamRows`, the one scan loop the preview and the export share; `filter.go` plans pushdown vs residual; `residual.go` evaluates what can't be pushed down; `export.go` streams CSV/JSON
 - `frontend/src/` — React/TS UI; `frontend/wailsjs/` is regenerated and gitignored
-- `frontend/src/state/` — the logic worth testing without a DOM: `filters.ts` (filter-bar rules + per-table memory), `sort.ts` (cell comparator), `virtual.ts` (row windowing), `treeStore.ts` (tree reducer + the reveal walk), `pageSize.ts`
+- `frontend/src/state/` — the logic worth testing without a DOM: `filters.ts` (filter-bar rules + per-table memory), `sort.ts` (cell comparator), `previewTable.ts` (the preview table's TanStack features and column options), `virtual.ts` (row windowing), `treeStore.ts` (tree reducer + the reveal walk), `pageSize.ts`
 
 ## Tests
 
@@ -76,4 +76,4 @@ golangci-lint run            # config in .golangci.yml; CI runs the same version
 
 - `.github/workflows/ci.yml` on push/PR: Go vet + golangci-lint + `go test -race`; frontend typecheck, vitest and `npm run build`; then `wails build` on all three platforms. The frontend job runs `wails generate module` first, because `frontend/wailsjs` is generated and gitignored and the TS sources import from it.
 - `.github/workflows/release.yml` on a `v*` tag: the same tests gate three native build legs. `.github/scripts/stamp-version.sh` rewrites `info.productVersion` in `wails.json` from the tag — `wails build` has no version flag, and that field feeds `CFBundleVersion` and the Windows VERSIONINFO resource. The checked-in value stays `0.0.0`.
-- Dependabot groups the majors that only move in lockstep into one PR each (`vite` + `@vitejs/plugin-react` + `vitest`; `react` + `react-dom` + their `@types`), holds `@types/node` majors to the Node runtime, and holds minor/major bumps of `iceberg-go` and `wails/v2` for a human, since both carry the constraints DESIGN.md documents.
+- Dependabot groups the majors that only move in lockstep into one PR each (`vite` + `@vitejs/plugin-react` + `vitest`; `react` + `react-dom` + their `@types`). It can only group what is already published, so a vite major that lands before its plugin still arrives alone and fails CI. It holds `@types/node` majors to the Node runtime, and holds minor/major bumps of `iceberg-go` and `wails/v2` for a human, since both carry the constraints DESIGN.md documents.

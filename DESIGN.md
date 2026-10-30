@@ -724,9 +724,12 @@ embed reason described under [Testing](#testing).
 
 Dependabot (`.github/dependabot.yml`) tracks gomod, npm and the actions
 themselves, weekly, with minor/patch grouped. Majors that cannot land alone
-arrive as one grouped PR each — the build toolchain (`vite`,
+are bundled into one PR per set — the build toolchain (`vite`,
 `@vitejs/plugin-react`, `vitest`, which peer on a vite major) and React
-(`react`, `react-dom` and their `@types`). `@types/node` majors are held back
+(`react`, `react-dom` and their `@types`). A group can only bundle the
+majors already published when Dependabot runs, so a `vite` major that ships
+before its plugin still arrives alone and fails CI until the plugin catches
+up. `@types/node` majors are held back
 because it tracks the Node runtime in `NODE_VERSION`, and minor or major bumps
 of `iceberg-go` and `wails/v2` are held back for a human, because both carry the
 constraints this document records.

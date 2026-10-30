@@ -1,15 +1,5 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {
-    type ColumnDef,
-    type SortingState,
-    createPaginatedRowModel,
-    createSortedRowModel,
-    flexRender,
-    rowPaginationFeature,
-    rowSortingFeature,
-    tableFeatures,
-    useTable,
-} from '@tanstack/react-table';
+import {type SortingState, flexRender, useTable} from '@tanstack/react-table';
 import {CancelRequest, ExportPreview, PreviewTable} from '../../wailsjs/go/main/App';
 import {catalog} from '../../wailsjs/go/models';
 import {useDebounced} from '../hooks/useDebounced';
@@ -32,7 +22,7 @@ import {
     type FilterEntry,
     type FilterJoin,
 } from '../state/filters';
-import {previewSortingFn, sortableValue} from '../state/sort';
+import {type PreviewColumnDef, type PreviewRow as Row, previewColumn, previewFeatures} from '../state/previewTable';
 import {shouldVirtualize} from '../state/virtual';
 import {PRIORITY, useCommand, useRunCommand} from '../shortcuts/registry';
 import {errorMessage, toastError, toastInfo} from '../toast';
@@ -57,18 +47,6 @@ const DEFAULT_PAGE_SIZE = 100;
  * rows cannot drift apart the way a JS constant and a CSS rule would.
  */
 const ROW_HEIGHT = 29;
-
-type Row = Record<string, unknown>;
-
-// Module-level on purpose: TanStack v9 wants the features object stable across
-// renders. Sorting and pagination are client-side over the loaded buffer; the
-// core row model is built in.
-const previewFeatures = tableFeatures({
-    rowSortingFeature,
-    rowPaginationFeature,
-    sortedRowModel: createSortedRowModel(),
-    paginatedRowModel: createPaginatedRowModel(),
-});
 
 function placeholderFor(typeText: string, op: string): string {
     if (isSetOp(op)) return 'comma-separated values';
@@ -210,19 +188,8 @@ export function PreviewPanel({connName, namespace, name, schema}: Props) {
 
     const allRows = useMemo<Row[]>(() => (data?.rows ?? []) as Row[], [data?.rows]);
 
-    const columns = useMemo<ColumnDef<typeof previewFeatures, Row>[]>(
-        () =>
-            (data?.columns ?? []).map((c) => ({
-                id: c.name,
-                header: c.name,
-                // A null arrives as `undefined` so the column's sortUndefined
-                // can keep nulls last in both directions; renderCell shows
-                // both the same way.
-                accessorFn: (row) => sortableValue(row[c.name]),
-                cell: (info) => renderCell(info.getValue()),
-                sortFn: previewSortingFn,
-                sortUndefined: 'last',
-            })),
+    const columns = useMemo<PreviewColumnDef[]>(
+        () => (data?.columns ?? []).map((c) => previewColumn(c.name, (info) => renderCell(info.getValue()))),
         [data?.columns],
     );
 
