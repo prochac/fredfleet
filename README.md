@@ -241,7 +241,7 @@ Each fetch is **scan-and-discard**: the server iterates the Arrow stream from ro
 ### Prerequisites
 
 - Go 1.26+ (matches `go.mod`)
-- Node.js 20+ / npm
+- Node.js 22.12+ / npm (CI uses 24; Vitest 5 and Vite 8 need at least 22.12)
 - [Wails CLI v2.17.0](https://wails.io/docs/gettingstarted/installation): `go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.0`
 - Platform deps for Wails (run `wails doctor` to check):
   - **Linux**: WebKit2GTK 4.1, GTK 3, libgcc, pkg-config — on Arch: `sudo pacman -S webkit2gtk-4.1 gtk3`; on Debian/Ubuntu 24.04+: `sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev pkg-config`

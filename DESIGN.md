@@ -442,8 +442,9 @@ would imply otherwise.
 
 Row windowing is hand-rolled (`state/virtual.ts` + `hooks/useVirtualRows.ts`)
 rather than pulled from a library: the table is a fixed-row-height list in one
-scroller, which is the case windowing is trivial for, and TypeScript is held
-on 4.x, which cannot parse the `.d.ts` files current virtualizer packages ship.
+scroller, which is the case windowing is trivial for. (The original second
+reason — TypeScript 4.x could not parse current virtualizer packages' `.d.ts`
+files — went away with the TS 7 upgrade; the first still stands.)
 Row height is applied inline from the same constant the maths uses, so the two
 cannot drift. Below 150 rows nothing is windowed — the spacer rows would cost
 more than they save, and plain rows keep text selection working across the whole
@@ -722,10 +723,13 @@ Both Go jobs write a placeholder `frontend/dist/index.html` first, for the
 embed reason described under [Testing](#testing).
 
 Dependabot (`.github/dependabot.yml`) tracks gomod, npm and the actions
-themselves, weekly, with minor/patch grouped. `typescript` and `@types/node`
-are ignored outright — they are pinned together and unpin together — and minor
-or major bumps of `iceberg-go` and `wails/v2` are held back for a human,
-because both carry the constraints this document records.
+themselves, weekly, with minor/patch grouped. Majors that cannot land alone
+arrive as one grouped PR each — the build toolchain (`vite`,
+`@vitejs/plugin-react`, `vitest`, which peer on a vite major) and React
+(`react`, `react-dom` and their `@types`). `@types/node` majors are held back
+because it tracks the Node runtime in `NODE_VERSION`, and minor or major bumps
+of `iceberg-go` and `wails/v2` are held back for a human, because both carry the
+constraints this document records.
 
 ## Release and packaging
 

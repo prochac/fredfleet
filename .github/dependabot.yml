@@ -23,37 +23,21 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     groups:
+      # Majors that only work in lockstep arrive as one PR each: vitest and
+      # @vitejs/plugin-react peer on a vite major, and React's types follow
+      # React. A lone major from either set fails CI by construction.
+      build-toolchain-major:
+        patterns: [vite, '@vitejs/plugin-react', vitest]
+        update-types: [major]
+      react-major:
+        patterns: [react, react-dom, '@types/react', '@types/react-dom']
+        update-types: [major]
       npm-minor-patch:
         update-types: [minor, patch]
     ignore:
-      # Both are pinned on purpose: TypeScript is held at 4.6, and @types/node
-      # above v18 ships .d.ts files that 4.6 cannot parse (TS1005/TS1139),
-      # which breaks `npm run build` and therefore every wails build. They
-      # unpin together or not at all — see CLAUDE.md.
-      - dependency-name: typescript
+      # @types/node describes the runtime, so it tracks NODE_VERSION in the
+      # workflows (24), not npm's latest. Bump the major together with it.
       - dependency-name: '@types/node'
-      # The build toolchain is one coupled set anchored on vite 3 and TS 4.6,
-      # and the first Dependabot batch proved it: vitest 4 wants vite >=6 and
-      # @types/node >=20, @vitejs/plugin-react 6 wants vite 8, React 19's types
-      # want TS >=5. All three PRs failed CI. None of these can major alone, so
-      # they move together in one deliberate upgrade or not at all.
-      #
-      # Runtime dependencies (sonner, @tanstack/react-table) are deliberately
-      # not listed: they are independent of that wall, and CI is a good enough
-      # judge of whether their majors land.
-      - dependency-name: vite
-        update-types: [version-update:semver-major]
-      - dependency-name: '@vitejs/plugin-react'
-        update-types: [version-update:semver-major]
-      - dependency-name: vitest
-        update-types: [version-update:semver-major]
-      - dependency-name: react
-        update-types: [version-update:semver-major]
-      - dependency-name: react-dom
-        update-types: [version-update:semver-major]
-      - dependency-name: '@types/react'
-        update-types: [version-update:semver-major]
-      - dependency-name: '@types/react-dom'
         update-types: [version-update:semver-major]
 
   - package-ecosystem: github-actions
