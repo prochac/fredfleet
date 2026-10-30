@@ -3,6 +3,7 @@ package catalog
 import (
 	"os"
 	"os/exec"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -134,25 +135,64 @@ func TestUnknownJoinIsRejected(t *testing.T) {
 
 // --- nested fields --------------------------------------------------------
 
+// nestedCrashShapes are the row filters that crash upstream, one per row of
+// the 💥 table in docs/upstream/nested-same-field-crash.md. A fix may land for
+// one shape (or one leaf type) and not the others, so every one is probed.
+var nestedCrashShapes = map[string]func() iceberg.BooleanExpression{
+	"string-range": func() iceberg.BooleanExpression {
+		city := iceberg.Reference("addr.city")
+		return iceberg.NewAnd(iceberg.GreaterThanEqual(city, "city-0"), iceberg.LessThan(city, "city-2"))
+	},
+	"string-neq-neq": func() iceberg.BooleanExpression {
+		city := iceberg.Reference("addr.city")
+		return iceberg.NewAnd(iceberg.NotEqualTo(city, "city-0"), iceberg.NotEqualTo(city, "city-1"))
+	},
+	"string-notin-notnull": func() iceberg.BooleanExpression {
+		city := iceberg.Reference("addr.city")
+		return iceberg.NewAnd(iceberg.NotIn(city, "city-0", "city-1"), iceberg.NotNull(city))
+	},
+	"string-eq-notnull": func() iceberg.BooleanExpression {
+		city := iceberg.Reference("addr.city")
+		return iceberg.NewAnd(iceberg.EqualTo(city, "city-0"), iceberg.NotNull(city))
+	},
+	"string-notnull-or-eq": func() iceberg.BooleanExpression {
+		city := iceberg.Reference("addr.city")
+		return iceberg.NewOr(iceberg.NotNull(city), iceberg.EqualTo(city, "city-0"))
+	},
+	"int-range": func() iceberg.BooleanExpression {
+		zip := iceberg.Reference("addr.zip")
+		return iceberg.NewAnd(iceberg.GreaterThan(zip, int32(10002)), iceberg.LessThan(zip, int32(10010)))
+	},
+	"int-notnull-gt": func() iceberg.BooleanExpression {
+		zip := iceberg.Reference("addr.zip")
+		return iceberg.NewAnd(iceberg.NotNull(zip), iceberg.GreaterThan(zip, int32(10002)))
+	},
+}
+
+// arrowTakeFrame matches a stack frame in arrow-go's take kernels. The panic
+// message varies by shape and leaf type (a short string offset buffer, an index
+// out of range, a nil dereference), but each one dies in compute.structTake or
+// in kernels.PrimitiveTake underneath it.
+var arrowTakeFrame = regexp.MustCompile(`arrow/compute[\w/.]*\.\w*Take`)
+
 // TestNestedPushdownStillBrokenUpstream is the reason residual.go exists, and
 // the signal to delete it.
 //
 // Since iceberg-go v0.7.0 a lone nested predicate scans fine, but two on the
 // same nested field panic inside arrow-go's struct take kernel, on a worker
 // goroutine nothing can recover. The panic kills whichever process scans, so
-// the scan runs in a child copy of this test binary and the parent asserts
-// that the child died. If it starts failing, upstream has fixed it and nested
-// predicates can be pushed down again.
+// each shape runs in a child copy of this test binary and the parent asserts
+// that the child died in arrow-go's take kernels. Only when every shape survives can nested
+// predicates be pushed down again; a partial fix is logged, not acted on.
 func TestNestedPushdownStillBrokenUpstream(t *testing.T) {
 	const probeEnv = "FREDFLEET_NESTED_PUSHDOWN_PROBE"
-	if os.Getenv(probeEnv) == "1" {
+	if shape := os.Getenv(probeEnv); shape != "" {
+		filter, ok := nestedCrashShapes[shape]
+		if !ok {
+			t.Fatalf("unknown probe shape %q", shape)
+		}
 		tbl := newNestedFixtureTable(t, 20, 20)
-		city := iceberg.Reference("addr.city")
-		scan := tbl.Scan(table.WithRowFilter(iceberg.NewAnd(
-			iceberg.GreaterThanEqual(city, "city-0"),
-			iceberg.LessThan(city, "city-2"),
-		)))
-		_, itr, err := scan.ToArrowRecords(t.Context())
+		_, itr, err := tbl.Scan(table.WithRowFilter(filter())).ToArrowRecords(t.Context())
 		if err != nil {
 			t.Fatalf("ToArrowRecords: %v", err)
 		}
@@ -165,15 +205,27 @@ func TestNestedPushdownStillBrokenUpstream(t *testing.T) {
 		return
 	}
 
-	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestNestedPushdownStillBrokenUpstream$", "-test.count=1")
-	cmd.Env = append(os.Environ(), probeEnv+"=1")
-	out, err := cmd.CombinedOutput()
-	if err == nil {
-		t.Fatal("a range on a nested field now scans cleanly upstream — " +
-			"drop the residual pass in residual.go and push nested predicates down again")
+	var survived []string
+	for shape := range nestedCrashShapes {
+		cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestNestedPushdownStillBrokenUpstream$", "-test.count=1")
+		cmd.Env = append(os.Environ(), probeEnv+"="+shape)
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			survived = append(survived, shape)
+			continue
+		}
+		if !strings.Contains(string(out), "panic:") || !arrowTakeFrame.Match(out) {
+			t.Errorf("probe %s failed, but not with a panic in arrow-go's take kernels; the gap may have moved:\n%s", shape, out)
+		}
 	}
-	if !strings.Contains(string(out), "panic:") {
-		t.Fatalf("the probe failed, but not with the known panic; the gap may have moved:\n%s", out)
+	slices.Sort(survived)
+	switch {
+	case len(survived) == len(nestedCrashShapes):
+		t.Fatal("every known crashing shape now scans cleanly upstream — " +
+			"drop the residual pass in residual.go and push nested predicates down again")
+	case len(survived) > 0:
+		t.Logf("partially fixed upstream; these shapes no longer crash: %v — "+
+			"update docs/upstream/nested-same-field-crash.md, keep residual.go", survived)
 	}
 }
 
@@ -294,6 +346,22 @@ func TestNotInExcludesNulls(t *testing.T) {
 	want := []int64{}
 	for i := range int64(30) {
 		if i%4 != 0 && i%3 == 1 {
+			want = append(want, i)
+		}
+	}
+	assertIDs(t, rowIDs(t, dto), want)
+
+	// neq must agree: iceberg-go's NotEqualTo already drops nulls, and the
+	// README promises both operators do.
+	dto, err = BuildPreviewRows(ctx, top, 0, 100, []PreviewFilterDTO{
+		{Field: "tag", Op: "neq", Value: "a"},
+	})
+	if err != nil {
+		t.Fatalf("top-level neq preview: %v", err)
+	}
+	want = []int64{}
+	for i := range int64(30) {
+		if i%4 != 0 && i%3 != 0 {
 			want = append(want, i)
 		}
 	}

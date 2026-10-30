@@ -253,10 +253,13 @@ loses its row limit and keeps pulling batches until the page is full, so a
 nested filter matching nothing reads the whole table. It stays bounded by the
 same 60 s timeout and `CancelRequest` path as any other slow scan.
 
-`TestNestedPushdownStillBrokenUpstream` pins the upstream gap against a live
-fixture scan — in a child copy of the test binary, since the panic would
-otherwise take the test process with it — and will fail the day the child
-survives. That is the signal to delete the residual pass.
+`TestNestedPushdownStillBrokenUpstream` pins the upstream gap against live
+fixture scans. It runs every known crashing shape in its own child copy of the
+test binary, since the panic would otherwise take the test process with it,
+and requires each child to die in arrow-go's take kernels. A fix can land for
+one shape or leaf type and not the others, so a partial fix only logs. The
+test fails once every shape survives, and that is the signal to delete the
+residual pass.
 
 #### Pagination
 
@@ -273,7 +276,7 @@ varies from call to call, so "Load more" could repeat rows the previous page had
 already shown while skipping others outright — on a single-file table, which is
 what the original fixtures were, the bug is invisible. `BuildPreviewRows`
 therefore pins the scan to one worker with `table.WithMaxConcurrency(1)`
-(upstream's spelling), trading file-level parallelism for a stable order.
+(v0.7.0's spelling; before that it was the misspelt `WitMaxConcurrency`), trading file-level parallelism for a stable order.
 `TestScanOrderIsStableAcrossCalls` and `TestLoadMoreAcrossManyDataFiles` pin it.
 
 Cost is `O(skip + limit)` per call. Acceptable for browsing; deep paging on a
@@ -575,7 +578,7 @@ does not maintain an `iceberg-go` fork.
   tells us to delete the rejection.
 - **No safe pushdown for a nested field.** Two predicates on the same nested
   field panic inside arrow-go on a goroutine nothing can recover, killing the
-  process (until v0.6.0, *any* nested predicate failed with
+  process (before v0.7.0, *any* nested predicate failed with
   `could not bind reference`). Worked around at the boundary by the
   [residual pass](#nested-field-filters-and-the-residual-pass) rather than
   refused; `TestNestedPushdownStillBrokenUpstream` will fail when upstream

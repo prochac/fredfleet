@@ -34,7 +34,7 @@ makes no difference.
 | `addr.city IS NULL AND addr.zip < n`                | ✅ |
 | `addr.city = x OR addr.zip IS NULL`                 | ✅ |
 | `addr.city >= a AND addr.city < c`                  | 💥 `string offset buffer must have at least N values` |
-| `addr.city != a AND addr.city != b`                 | 💥 same |
+| `addr.city != a AND addr.city != b`                 | 💥 same, or a nil dereference in `TakeArrayOpts` under `structTake` |
 | `addr.city NOT IN (…) AND addr.city IS NOT NULL`    | 💥 same |
 | `addr.city = x AND addr.city IS NOT NULL`           | 💥 same |
 | `addr.city IS NOT NULL OR addr.city = x`            | 💥 same |
@@ -69,12 +69,20 @@ created by github.com/apache/arrow-go/v18/arrow/compute.execInternal
 
 ## Reproduce
 
-In this repo, run the sentinel's child half directly. It crashes:
+In this repo, run one shape of the sentinel's child half directly. The shape
+names are the keys of `nestedCrashShapes` in
+`internal/catalog/filter_scan_test.go` (`string-range`, `int-range`, …). It
+crashes:
 
 ```bash
-FREDFLEET_NESTED_PUSHDOWN_PROBE=1 go test -count=1 \
+FREDFLEET_NESTED_PUSHDOWN_PROBE=string-range go test -count=1 \
   -run '^TestNestedPushdownStillBrokenUpstream$' ./internal/catalog/
 ```
+
+The int shapes die one level lower, in `kernels.PrimitiveTake`, with
+`index out of range`. The sentinel accepts a panic in either frame and nothing
+else, so an unrelated panic in a later bump surfaces as a failure instead of
+passing for the known crash.
 
 The core of it, for an upstream report:
 
@@ -101,7 +109,10 @@ for batch, err := range itr { … } // panics during iteration
 
 ## When it's fixed
 
-`TestNestedPushdownStillBrokenUpstream` starts failing. Then delete
+`TestNestedPushdownStillBrokenUpstream` probes every 💥 row above in its own
+child process. If only some shapes survive, it logs them and still passes:
+update this table, and keep the residual pass. It fails only once every shape
+survives. Then delete
 `residual.go`, push every predicate down from `BuildRowFilter`, and keep
 `TestNotInExcludesNulls`: `buildSet`'s `NotIn AND NotNull` would then also reach
 nested fields, and it is one of the shapes in the table above. DESIGN.md's

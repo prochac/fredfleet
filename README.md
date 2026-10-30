@@ -2,7 +2,7 @@
 
 Desktop app for browsing Apache Iceberg catalogs. Built with [Wails v2](https://wails.io) (Go backend + React/TypeScript frontend) on top of [`iceberg-go`](https://github.com/apache/iceberg-go).
 
-Status: feature-complete, unreleased — connection manager, namespace tree, schema viewer, row preview with filters and pagination, command palette, error toasts, and unsigned release builds. See [`DESIGN.md`](DESIGN.md).
+Status: feature-complete, pre-1.0. Public v0.x builds are on the Releases page; there is no stable release yet. Features: connection manager, namespace tree, schema viewer, row preview with filters and pagination, command palette, error toasts, and unsigned release builds. See [`DESIGN.md`](DESIGN.md).
 
 ## Install
 
