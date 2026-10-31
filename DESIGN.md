@@ -744,6 +744,14 @@ runs the build legs and uploads artifacts without drafting a release (the
 release job is gated on `refs/tags/v`) — that is the way to smoke-test the
 pipeline before spending a tag.
 
+The release notes are the **annotated tag's message** (everything after its
+first line), followed by a compare link to the previous tag. GitHub's generated
+notes list merged PRs only, so v0.2.0's filters, sorting and export commit,
+pushed straight to `master`, was missing from them. A lightweight tag fails the
+release job rather than publishing the commit message as notes. So tag with
+`git tag -a vX.Y.Z`, write the notes there, and publish the draft once its
+assets are checked.
+
 `wails build` has no version flag: it reads `info.productVersion` out of
 `wails.json` and templates it into `CFBundleVersion` /
 `CFBundleShortVersionString` and the Windows VERSIONINFO resource. Each build
